@@ -1576,8 +1576,8 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
     }
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 21):
+@st.cache_data(ttl=300, show_spinner="뉴스 수집 중...")
+def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 22):
     """
     1) 피싱·보이스피싱·금융사기 등 관련 키워드로 뉴스 전체 수집
     2) 수집 기사 중 범죄 행위·수단이 드러나는 기사만 추려 키워드·주의보 분석
@@ -1754,7 +1754,8 @@ def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 21
             found_crimes.extend(article["keywords"])
 
     method_news.sort(key=lambda x: (x["score"], x["datetime"]), reverse=True)
-    return method_news, all_news, found_crimes, errors, keyword_rank
+    fetched_at = datetime.now()
+    return method_news, all_news, found_crimes, errors, keyword_rank, fetched_at
 
 
 # ---------------------------------------------------------------------------
@@ -1769,10 +1770,17 @@ if not client_id or not client_secret:
     )
     st.stop()
 
-with st.spinner(f"{SEED_SEARCH_LABEL} 피싱·사기 뉴스 수집 및 범죄 행위 분석 중..."):
-    news_list, all_news_list, crime_hits, fetch_errors, derived_keywords = (
-        fetch_phishing_news(client_id, client_secret, _cache_ver=21)
-    )
+refresh_col, info_col = st.columns([1, 4])
+with refresh_col:
+    if st.button("🔄 새로고침", key="refresh_news", help="네이버 뉴스 API에서 최신 기사를 다시 불러옵니다"):
+        fetch_phishing_news.clear()
+        st.rerun()
+with info_col:
+    st.caption("버튼을 누르면 즉시 최신 기사를 다시 불러옵니다. (자동 갱신: 5분)")
+
+news_list, all_news_list, crime_hits, fetch_errors, derived_keywords, fetched_at = (
+    fetch_phishing_news(client_id, client_secret, _cache_ver=22)
+)
 
 if fetch_errors and not news_list and not all_news_list:
     st.error("뉴스 데이터를 가져오지 못했습니다.\n\n- " + "\n- ".join(fetch_errors))
@@ -1795,6 +1803,7 @@ st.write(
     "실제 피해·범행 사례가 드러나는 기사 위주로 정리해 주의보와 예방 정보를 안내합니다."
 )
 st.caption("뉴스 검색 제공: NAVER Developers · 검색 API")
+st.caption(f"기사 목록 기준 시각: {fetched_at.strftime('%Y-%m-%d %H:%M')}")
 
 # 주의보는 키워드 분석 1위 우선, 없으면 기존 수법 카운터
 if derived_keywords:
@@ -1839,6 +1848,11 @@ st.caption(
     "피싱·사기 관련 기사 중 실제 피해·범행 사례가 드러나고, "
     "사칭·편취·계좌이체 등 범죄 행위·수단이 확인된 기사만 정리했습니다."
 )
+st.caption(
+    f"총 {len(news_list)}건 · 목록 기준 {fetched_at.strftime('%m/%d %H:%M')}"
+    if news_list
+    else f"목록 기준 {fetched_at.strftime('%m/%d %H:%M')}"
+)
 
 if news_list:
     current_visible_news = news_list[: st.session_state.display_count]
@@ -1879,7 +1893,7 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# 파트 2: 피싱 사기 전체 스크랩
+# 파트 2: 최신 금융사기 전체
 # ---------------------------------------------------------------------------
 st.markdown(
     '<h2 class="phishing-mobile-title">최신 금융사기 Moa Moa</h2>',
@@ -1888,6 +1902,11 @@ st.markdown(
 st.caption(
     "투자사기·대출사기·가상자산 사기 등 "
     "다양한 금융·피싱 사기 기사를 **최신순**으로 모았습니다."
+)
+st.caption(
+    f"총 {len(all_news_list)}건 · 목록 기준 {fetched_at.strftime('%m/%d %H:%M')}"
+    if all_news_list
+    else f"목록 기준 {fetched_at.strftime('%m/%d %H:%M')}"
 )
 
 if all_news_list:
@@ -1913,9 +1932,9 @@ if all_news_list:
             st.session_state.display_count_all += 10
             st.rerun()
     else:
-        st.caption(f"전체 스크랩 {len(all_news_list)}건을 모두 표시했습니다.")
+        st.caption(f"전체 {len(all_news_list)}건을 모두 표시했습니다.")
 else:
-    st.info("피싱 사기 관련 전체 스크랩 기사가 없습니다.")
+    st.info("금융·피싱 사기 관련 기사가 없습니다.")
 
 st.caption(
     "본 서비스는 공개 뉴스 키워드·요약문 분석 기반 **범죄 예방 안내용**이며, "
