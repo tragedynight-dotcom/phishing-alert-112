@@ -18,14 +18,58 @@ st.set_page_config(
     layout="centered",
 )
 
-if "alert_shown" not in st.session_state:
-    st.session_state.alert_shown = False
 if "display_count" not in st.session_state:
     st.session_state.display_count = 5
 if "display_count_all" not in st.session_state:
     st.session_state.display_count_all = 5
 if "notify_ready" not in st.session_state:
     st.session_state.notify_ready = False
+
+# 6인치(약 480px 이하) 모바일에서 섹션 제목 한 줄 표시
+st.markdown(
+    """
+    <style>
+    h1.phishing-mobile-title {
+      font-size: 2.25rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem 0;
+      padding: 0;
+    }
+    h2.phishing-mobile-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 1rem 0 0.5rem 0;
+      padding: 0;
+    }
+    @media (max-width: 480px) {
+      .block-container {
+        padding-left: 0.55rem !important;
+        padding-right: 0.55rem !important;
+        max-width: 100% !important;
+      }
+      h1.phishing-mobile-title,
+      h2.phishing-mobile-title {
+        white-space: nowrap !important;
+        line-height: 1.15 !important;
+        letter-spacing: -0.05em !important;
+        word-break: keep-all !important;
+        overflow: hidden;
+        text-overflow: clip;
+      }
+      h1.phishing-mobile-title {
+        font-size: clamp(0.92rem, 4.6vw, 1.75rem) !important;
+        margin-bottom: 0.35rem !important;
+      }
+      h2.phishing-mobile-title {
+        font-size: clamp(0.68rem, 3.25vw, 1.4rem) !important;
+        margin-top: 0.6rem !important;
+        margin-bottom: 0.2rem !important;
+      }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # 추적할 피싱 수법 키워드 (긴 키워드 우선 매칭)
 PHISHING_KEYWORDS = [
@@ -1483,6 +1527,62 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
     }
 
 
+def build_notification_scheduler_script() -> str:
+    """앱 실행 시 알림은 띄우지 않고, 동의 후에만 매일 1회 백그라운드 확인."""
+    return """
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8" /></head><body>
+    <script>
+      (function () {
+        const w = (function () {
+          try {
+            if (window.parent && window.parent !== window) return window.parent;
+          } catch (e) {}
+          return window;
+        })();
+        if (w.__phishingDailySchedulerReady) return;
+        w.__phishingDailySchedulerReady = true;
+
+        const CONSENT_KEY = "phishing_notify_consent";
+        const PAYLOAD_KEY = "phishing_notify_payload";
+        const LAST_DATE_KEY = "phishing_last_notify_date";
+
+        w.__phishingCheckDailyNotify = function () {
+          try {
+            if (!("Notification" in w)) return;
+            if (w.Notification.permission !== "granted") return;
+            if (w.localStorage.getItem(CONSENT_KEY) !== "1") return;
+
+            const today = new Date().toISOString().slice(0, 10);
+            if (w.localStorage.getItem(LAST_DATE_KEY) === today) return;
+
+            const raw = w.localStorage.getItem(PAYLOAD_KEY);
+            if (!raw) return;
+            const payload = JSON.parse(raw);
+            if (!payload.title) return;
+
+            new w.Notification(payload.title, {
+              body: payload.body,
+              icon: payload.icon || "https://cdn-icons-png.flaticon.com/512/564/564619.png",
+              tag: "phishing-daily-alert",
+              requireInteraction: true,
+            });
+            w.localStorage.setItem(LAST_DATE_KEY, today);
+
+            if (w.navigator.serviceWorker && w.navigator.serviceWorker.controller) {
+              w.navigator.serviceWorker.controller.postMessage({ type: "CHECK_DAILY" });
+            }
+          } catch (e) {}
+        };
+
+        // 앱 실행 직후 알림은 보내지 않고, 이후 1시간마다 '오늘 1회' 여부만 확인
+        setInterval(w.__phishingCheckDailyNotify, 60 * 60 * 1000);
+      })();
+    </script>
+    </body></html>
+    """
+
+
 def build_home_alert_widget(
     title: str, message: str, top_crime: str, how_detail: str, top_count: int
 ) -> str:
@@ -1495,6 +1595,9 @@ def build_home_alert_widget(
     crime_js = json.dumps(top_crime, ensure_ascii=False)
     how_js = json.dumps(how_detail, ensure_ascii=False)
     count_js = json.dumps(top_count, ensure_ascii=False)
+    icon_js = json.dumps(
+        "https://cdn-icons-png.flaticon.com/512/564/564619.png", ensure_ascii=False
+    )
     return f"""
     <!DOCTYPE html>
     <html>
@@ -1521,14 +1624,14 @@ def build_home_alert_widget(
     </head>
     <body>
       <div class="wrap">
-        <h3>🚨 홈 긴급 알림</h3>
+        <h3>🚨 피싱 주의보 알림</h3>
         <p>
           <strong>최다 키워드:</strong> <span id="crime"></span>
           (<span id="count"></span>회)
         </p>
         <p class="how"><strong>범행 진행:</strong> <span id="how"></span></p>
-        <p>아래 버튼을 누르면 OS 알림으로도 같은 내용을 받을 수 있습니다.</p>
-        <button id="btn" type="button">🔔 알림 허용하고 주의보 받기</button>
+        <p>알림 동의 시 <strong>매일 1회</strong> OS 팝업으로 주의보를 받을 수 있습니다. (앱을 열지 않아도 브라우저/바탕화면 앱이 켜져 있으면 발송)</p>
+        <button id="btn" type="button">🔔 알림 동의 (매일 1회)</button>
         <span id="status"></span>
       </div>
       <script>
@@ -1537,91 +1640,109 @@ def build_home_alert_widget(
         const crime = {crime_js};
         const how = {how_js};
         const count = {count_js};
+        const icon = {icon_js};
         document.getElementById("crime").textContent = crime;
         document.getElementById("how").textContent = how;
         document.getElementById("count").textContent = count;
         const statusEl = document.getElementById("status");
 
+        const CONSENT_KEY = "phishing_notify_consent";
+        const PAYLOAD_KEY = "phishing_notify_payload";
+
         function hostWindow() {{
           try {{
-            if (window.parent && window.parent !== window && window.parent.Notification) {{
+            if (window.parent && window.parent !== window && window.parent.localStorage) {{
               return window.parent;
             }}
           }} catch (e) {{}}
           return window;
         }}
 
-        function playBeep(w) {{
+        function buildPayload() {{
+          return {{ title, body, crime, how, count, icon }};
+        }}
+
+        function savePayloadSilently() {{
+          const w = hostWindow();
           try {{
-            const AC = w.AudioContext || w.webkitAudioContext;
-            if (!AC) return;
-            const ctx = new AC();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = "square";
-            osc.frequency.value = 880;
-            gain.gain.value = 0.04;
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start();
-            setTimeout(() => {{ osc.stop(); ctx.close(); }}, 220);
+            w.localStorage.setItem(PAYLOAD_KEY, JSON.stringify(buildPayload()));
+            if (w.navigator.serviceWorker && w.navigator.serviceWorker.controller) {{
+              w.navigator.serviceWorker.controller.postMessage({{
+                type: "SAVE_NOTIFY_CONFIG",
+                consent: w.localStorage.getItem(CONSENT_KEY) || "0",
+                payload: buildPayload(),
+              }});
+            }}
           }} catch (e) {{}}
         }}
 
-        function sendNotification() {{
+        async function registerBackgroundDaily(w) {{
+          if (!("serviceWorker" in w.navigator)) return;
+          try {{
+            const reg = await w.navigator.serviceWorker.register("/static/phishing-sw.js");
+            await reg.update();
+            reg.active?.postMessage({{
+              type: "SAVE_NOTIFY_CONFIG",
+              consent: "1",
+              payload: buildPayload(),
+            }});
+            if ("periodicSync" in reg) {{
+              try {{
+                await reg.periodicSync.register("phishing-daily", {{
+                  minInterval: 24 * 60 * 60 * 1000,
+                }});
+              }} catch (e) {{}}
+            }}
+          }} catch (e) {{}}
+        }}
+
+        function enableDailyNotification() {{
           const w = hostWindow();
           if (!("Notification" in w)) {{
-            statusEl.textContent = "이 브라우저는 시스템 알림을 지원하지 않습니다. 화면 주의보를 확인하세요.";
+            statusEl.textContent = "이 브라우저는 시스템 알림을 지원하지 않습니다.";
             return;
           }}
-          const show = () => {{
+
+          const finish = async () => {{
             try {{
-              new w.Notification(title, {{
-                body,
-                icon: "https://cdn-icons-png.flaticon.com/512/564/564619.png",
-                requireInteraction: true,
-                tag: "phishing-home-alert"
-              }});
-              playBeep(w);
-              statusEl.textContent = "✅ 시스템 알림을 보냈습니다. (이미 허용된 경우 바로 표시됩니다)";
+              w.localStorage.setItem(CONSENT_KEY, "1");
+              savePayloadSilently();
+              await registerBackgroundDaily(w);
+              if (typeof w.__phishingCheckDailyNotify === "function") {{
+                w.__phishingDailySchedulerReady = true;
+              }}
+              statusEl.textContent = "✅ 알림 동의 완료. 매일 1회 OS 팝업으로 주의보가 발송됩니다.";
             }} catch (err) {{
-              statusEl.textContent = "알림 표시 실패: " + err;
+              statusEl.textContent = "설정 저장 실패: " + err;
             }}
           }};
 
           if (w.Notification.permission === "granted") {{
-            show();
+            finish();
           }} else if (w.Notification.permission === "denied") {{
-            statusEl.textContent = "알림이 차단되어 있습니다. 브라우저 사이트 설정에서 알림을 허용해 주세요.";
+            statusEl.textContent = "알림이 차단되어 있습니다. 브라우저 사이트 설정에서 허용해 주세요.";
           }} else {{
             w.Notification.requestPermission().then((permission) => {{
-              if (permission === "granted") show();
-              else statusEl.textContent = "알림 권한이 거부되었습니다. 브라우저 주소창 자물쇠 아이콘에서 허용할 수 있습니다.";
+              if (permission === "granted") finish();
+              else statusEl.textContent = "알림 권한이 거부되었습니다.";
             }});
           }}
         }}
 
-        document.getElementById("btn").addEventListener("click", sendNotification);
+        document.getElementById("btn").addEventListener("click", enableDailyNotification);
 
-        // 이미 허용된 경우 홈 진입 시 자동 1회 시도
-        (function autoIfGranted() {{
+        // 최신 주의보 내용만 저장하고, 앱 실행 시 알림은 띄우지 않음
+        savePayloadSilently();
+        try {{
           const w = hostWindow();
-          try {{
-            if ("Notification" in w && w.Notification.permission === "granted") {{
-              const key = "phishing_alert_" + crime;
-              if (w.sessionStorage.getItem(key) !== "1") {{
-                sendNotification();
-                w.sessionStorage.setItem(key, "1");
-              }} else {{
-                statusEl.textContent = "이번 세션에서 이미 알림을 보냈습니다. 다시 받으려면 버튼을 누르세요.";
-              }}
-            }} else {{
-              statusEl.textContent = "알림이 오지 않았다면 버튼을 한 번 눌러 권한을 허용해 주세요.";
-            }}
-          }} catch (e) {{
-            statusEl.textContent = "알림이 오지 않았다면 버튼을 한 번 눌러 권한을 허용해 주세요.";
+          if (w.localStorage.getItem(CONSENT_KEY) === "1") {{
+            statusEl.textContent = "알림 동의 상태입니다. 매일 1회 OS 팝업으로 발송됩니다.";
+          }} else {{
+            statusEl.textContent = "알림을 받으려면 위 버튼을 눌러 동의해 주세요.";
           }}
-        }})();
+        }} catch (e) {{
+          statusEl.textContent = "알림을 받으려면 위 버튼을 눌러 동의해 주세요.";
+        }}
       </script>
     </body>
     </html>
@@ -1832,13 +1953,18 @@ if fetch_errors and not news_list and not all_news_list:
 elif fetch_errors:
     st.warning("일부 검색만 실패했습니다: " + " / ".join(fetch_errors))
 
+components.html(build_notification_scheduler_script(), height=0)
+
 crime_counter = Counter(crime_hits)
 
 # ---------------------------------------------------------------------------
 # 홈 화면: 긴급 주의보 + 동작하는 시스템 알림
 # ---------------------------------------------------------------------------
 st.caption("제작 : 광주동부경찰서 범죄예방대응과")
-st.title("👮‍♂️ 피싱 경보 112👮‍♀️")
+st.markdown(
+    '<h1 class="phishing-mobile-title">👮‍♂️ 피싱 경보 112👮‍♀️</h1>',
+    unsafe_allow_html=True,
+)
 st.write(
     f"{SEED_SEARCH_LABEL} 피싱·사기 관련 뉴스를 넓게 수집한 뒤, "
     "실제 피해·범행 사례가 드러나는 기사 위주로 정리해 주의보와 예방 정보를 안내합니다."
@@ -1869,11 +1995,6 @@ if derived_keywords:
         ),
         height=240,
     )
-    st.toast(
-        f"주의보: {alert['keyword']} — {alert['how'][:60]}{'…' if len(alert['how']) > 60 else ''}",
-        icon="🚨",
-    )
-    st.session_state.alert_shown = True
 elif crime_counter:
     top_crime, top_count = crime_counter.most_common(1)[0]
     alert = build_urgent_alert_info(top_crime, top_count, news_list)
@@ -1898,11 +2019,6 @@ elif crime_counter:
         ),
         height=240,
     )
-    st.toast(
-        f"주의보: {alert['keyword']} — {alert['how'][:60]}{'…' if len(alert['how']) > 60 else ''}",
-        icon="🚨",
-    )
-    st.session_state.alert_shown = True
 else:
     st.success("🟢 최근 한 달간 특별히 급증하는 특정 피싱 키워드는 탐지되지 않았습니다.")
 
@@ -1911,7 +2027,10 @@ st.divider()
 # ---------------------------------------------------------------------------
 # 파트 1: 수법·사건 중심 뉴스
 # ---------------------------------------------------------------------------
-st.subheader("미리 알고 대비하는 피싱 범죄 백서")
+st.markdown(
+    '<h2 class="phishing-mobile-title">미리 알고 대비하는 피싱 범죄 백서</h2>',
+    unsafe_allow_html=True,
+)
 st.caption(
     "피싱·사기 관련 기사 중 실제 피해·범행 사례가 드러나고, "
     "사칭·편취·계좌이체 등 범죄 행위·수단이 확인된 기사만 정리했습니다."
@@ -1958,7 +2077,10 @@ st.divider()
 # ---------------------------------------------------------------------------
 # 파트 2: 피싱 사기 전체 스크랩
 # ---------------------------------------------------------------------------
-st.subheader("최신 금융사기 Moa Moa")
+st.markdown(
+    '<h2 class="phishing-mobile-title">최신 금융사기 Moa Moa</h2>',
+    unsafe_allow_html=True,
+)
 st.caption(
     "투자사기·대출사기·가상자산 사기 등 "
     "다양한 금융·피싱 사기 기사를 **최신순**으로 모았습니다."
