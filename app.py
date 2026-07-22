@@ -3,7 +3,7 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 import streamlit as st
@@ -24,6 +24,30 @@ if "display_count_all" not in st.session_state:
     st.session_state.display_count_all = 5
 if "notify_ready" not in st.session_state:
     st.session_state.notify_ready = False
+
+# 알림 아이콘 — 외부 CDN·Flaticon 미사용(자체 SVG)
+NOTIFICATION_ICON_URL = (
+    "data:image/svg+xml,"
+    + quote(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+        '<circle cx="32" cy="32" r="30" fill="#dc2626"/>'
+        '<text x="32" y="43" font-size="30" text-anchor="middle" fill="#ffffff" '
+        'font-family="Arial,sans-serif" font-weight="700">!</text>'
+        "</svg>"
+    )
+)
+
+# PWA(홈 화면 추가) 및 알림 아이콘 설정
+st.markdown(
+    """
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="icon" href="/static/icon.svg">
+    <meta name="theme-color" content="#b91c1c">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="피싱경보">
+    """,
+    unsafe_allow_html=True,
+)
 
 # 6인치(약 480px 이하) 모바일에서 섹션 제목 한 줄·최대 크기 자동 맞춤
 st.markdown(
@@ -1588,93 +1612,225 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
 
 
 def build_notification_scheduler_script() -> str:
-    """앱 실행 시 알림은 띄우지 않고, 동의 후 지정 시각(매일 2회)에만 발송."""
-    return """
+    """예약 알림 엔진 — 부모 창에 타이머 등록(앱 실행 시 즉시 알림은 보내지 않음)."""
+    icon_js = json.dumps(NOTIFICATION_ICON_URL, ensure_ascii=False)
+    return f"""
     <!DOCTYPE html>
     <html><head><meta charset="utf-8" /></head><body>
     <script>
-      (function () {
-        const w = (function () {
-          try {
+      (function () {{
+        const w = (function () {{
+          try {{
             if (window.parent && window.parent !== window) return window.parent;
-          } catch (e) {}
+          }} catch (e) {{}}
           return window;
-        })();
-        if (w.__phishingDailySchedulerReady) return;
-        w.__phishingDailySchedulerReady = true;
+        }})();
 
         const CONSENT_KEY = "phishing_notify_consent";
         const PAYLOAD_KEY = "phishing_notify_payload";
         const SENT_SLOTS_KEY = "phishing_notify_sent_slots";
-        const NOTIFY_SLOTS = ["02:10", "14:10"];
+        const NOTIFY_SLOTS = ["02:18", "14:10"];
+        const GRACE_MINUTES = 30;
+        const DEFAULT_ICON = {icon_js};
 
-        function pad(n) { return String(n).padStart(2, "0"); }
+        function pad(n) {{ return String(n).padStart(2, "0"); }}
 
-        function todayKey(d) {
+        function slotMinutes(slot) {{
+          const parts = slot.split(":");
+          return Number(parts[0]) * 60 + Number(parts[1]);
+        }}
+
+        function todayKey(d) {{
           d = d || new Date();
           return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
-        }
+        }}
 
-        function currentHM(d) {
-          d = d || new Date();
-          return pad(d.getHours()) + ":" + pad(d.getMinutes());
-        }
+        function loadSent() {{
+          try {{
+            return JSON.parse(w.localStorage.getItem(SENT_SLOTS_KEY) || "{{}}");
+          }} catch (e) {{ return {{}}; }}
+        }}
 
-        function loadSent() {
-          try {
-            return JSON.parse(w.localStorage.getItem(SENT_SLOTS_KEY) || "{}");
-          } catch (e) { return {}; }
-        }
-
-        function getSentToday() {
+        function getSentToday() {{
           return loadSent()[todayKey()] || [];
-        }
+        }}
 
-        function markSlotSent(slot) {
+        function markSlotSent(slot) {{
           const all = loadSent();
           const key = todayKey();
           const sent = all[key] || [];
           if (!sent.includes(slot)) sent.push(slot);
           all[key] = sent;
           w.localStorage.setItem(SENT_SLOTS_KEY, JSON.stringify(all));
-        }
+          syncToServiceWorker(w);
+        }}
 
-        w.__phishingCheckDailyNotify = function () {
-          try {
-            if (!("Notification" in w)) return;
-            if (w.Notification.permission !== "granted") return;
-            if (w.localStorage.getItem(CONSENT_KEY) !== "1") return;
+        function isSlotDue(now, slot) {{
+          const slotMin = slotMinutes(slot);
+          const nowMin = now.getHours() * 60 + now.getMinutes();
+          return nowMin >= slotMin && nowMin < slotMin + GRACE_MINUTES;
+        }}
+
+        function isCatchUpDue(now, slot) {{
+          if (getSentToday().includes(slot)) return false;
+          const nowMin = now.getHours() * 60 + now.getMinutes();
+          return nowMin > slotMinutes(slot);
+        }}
+
+        function msUntilSlot(slot) {{
+          const now = new Date();
+          const parts = slot.split(":");
+          const target = new Date(now);
+          target.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+          if (target <= now) target.setDate(target.getDate() + 1);
+          return target - now;
+        }}
+
+        function nextSlotLabel() {{
+          let bestMs = Infinity;
+          let bestSlot = NOTIFY_SLOTS[0];
+          NOTIFY_SLOTS.forEach(function (slot) {{
+            const ms = msUntilSlot(slot);
+            if (ms < bestMs) {{ bestMs = ms; bestSlot = slot; }}
+          }});
+          const d = new Date(Date.now() + bestMs);
+          return bestSlot + " (" + d.toLocaleString("ko-KR") + ")";
+        }}
+
+        async function syncToServiceWorker(host) {{
+          if (!host.navigator.serviceWorker) return;
+          try {{
+            await host.navigator.serviceWorker.ready;
+            const reg = await host.navigator.serviceWorker.getRegistration();
+            const payloadRaw = host.localStorage.getItem(PAYLOAD_KEY);
+            const payload = payloadRaw ? JSON.parse(payloadRaw) : null;
+            const msg = {{
+              type: "SAVE_NOTIFY_CONFIG",
+              consent: host.localStorage.getItem(CONSENT_KEY) || "0",
+              payload: payload,
+              sentSlots: loadSent(),
+            }};
+            if (reg && reg.active) reg.active.postMessage(msg);
+          }} catch (e) {{}}
+        }}
+
+        async function ensureServiceWorker(host) {{
+          if (!("serviceWorker" in host.navigator)) return null;
+          try {{
+            const reg = await host.navigator.serviceWorker.register("/static/phishing-sw.js");
+            await reg.update();
+            await host.navigator.serviceWorker.ready;
+            await syncToServiceWorker(host);
+            if ("periodicSync" in reg) {{
+              try {{
+                await reg.periodicSync.register("phishing-daily", {{
+                  minInterval: 12 * 60 * 60 * 1000,
+                }});
+              }} catch (e) {{}}
+            }}
+            return reg;
+          }} catch (e) {{
+            return null;
+          }}
+        }}
+
+        w.__phishingFireNotifySlot = function (slot, catchUp) {{
+          try {{
+            if (!("Notification" in w)) return false;
+            if (w.Notification.permission !== "granted") return false;
+            if (w.localStorage.getItem(CONSENT_KEY) !== "1") return false;
 
             const raw = w.localStorage.getItem(PAYLOAD_KEY);
-            if (!raw) return;
+            if (!raw) return false;
             const payload = JSON.parse(raw);
-            if (!payload.title) return;
+            if (!payload.title) return false;
 
-            const sentToday = getSentToday();
-            const hm = currentHM();
-            for (let i = 0; i < NOTIFY_SLOTS.length; i++) {
-              const slot = NOTIFY_SLOTS[i];
-              if (sentToday.includes(slot)) continue;
-              if (hm !== slot) continue;
+            const now = new Date();
+            if (catchUp) {{
+              if (!isCatchUpDue(now, slot)) return false;
+            }} else if (!isSlotDue(now, slot)) {{
+              return false;
+            }}
 
-              new w.Notification(payload.title, {
-                body: payload.body,
-                icon: payload.icon || "https://cdn-icons-png.flaticon.com/512/564/564619.png",
-                tag: "phishing-alert-" + slot,
-                requireInteraction: true,
-              });
-              markSlotSent(slot);
-            }
+            const bodyText = catchUp ? "(보완 발송) " + payload.body : payload.body;
+            new w.Notification(payload.title, {{
+              body: bodyText,
+              icon: payload.icon || DEFAULT_ICON,
+              tag: "phishing-alert-" + slot + "-" + todayKey(),
+              requireInteraction: true,
+            }});
+            markSlotSent(slot);
+            return true;
+          }} catch (e) {{
+            return false;
+          }}
+        }};
 
-            if (w.navigator.serviceWorker && w.navigator.serviceWorker.controller) {
-              w.navigator.serviceWorker.controller.postMessage({ type: "CHECK_SCHEDULED" });
-            }
-          } catch (e) {}
-        };
+        w.__phishingCheckDailyNotify = function () {{
+          NOTIFY_SLOTS.forEach(function (slot) {{
+            w.__phishingFireNotifySlot(slot, false);
+          }});
+          if (w.navigator.serviceWorker && w.navigator.serviceWorker.controller) {{
+            w.navigator.serviceWorker.controller.postMessage({{ type: "CHECK_SCHEDULED" }});
+          }}
+        }};
 
-        // 앱 실행 직후 알림은 보내지 않고, 30초마다 예약 시각(02:10·14:10) 확인
-        setInterval(w.__phishingCheckDailyNotify, 30 * 1000);
-      })();
+        w.__phishingCatchUpMissed = function () {{
+          if (w.localStorage.getItem(CONSENT_KEY) !== "1") return;
+          NOTIFY_SLOTS.forEach(function (slot) {{
+            w.__phishingFireNotifySlot(slot, true);
+          }});
+          if (w.navigator.serviceWorker && w.navigator.serviceWorker.controller) {{
+            w.navigator.serviceWorker.controller.postMessage({{ type: "CATCH_UP" }});
+          }}
+        }};
+
+        w.__phishingScheduleSlotTimeouts = function () {{
+          NOTIFY_SLOTS.forEach(function (slot) {{
+            const timerKey = "__phishingTimeout_" + slot;
+            if (w[timerKey]) w.clearTimeout(w[timerKey]);
+            const ms = msUntilSlot(slot);
+            w[timerKey] = w.setTimeout(function () {{
+              w.__phishingFireNotifySlot(slot, false);
+              w.__phishingScheduleSlotTimeouts();
+            }}, ms);
+          }});
+        }};
+
+        w.__phishingSetupNotifyScheduler = function () {{
+          if (w.__phishingNotifyInterval) w.clearInterval(w.__phishingNotifyInterval);
+          w.__phishingNotifyInterval = w.setInterval(w.__phishingCheckDailyNotify, 15000);
+          w.__phishingScheduleSlotTimeouts();
+          if (w.localStorage.getItem(CONSENT_KEY) === "1") {{
+            ensureServiceWorker(w).then(function () {{
+              w.__phishingCatchUpMissed();
+            }});
+          }}
+        }};
+
+        w.__phishingIsStandalone = function () {{
+          return (
+            w.matchMedia("(display-mode: standalone)").matches ||
+            w.navigator.standalone === true
+          );
+        }};
+
+        w.__phishingGetNextNotifyLabel = function () {{
+          return nextSlotLabel();
+        }};
+
+        if (!w.__phishingVisibilityHook) {{
+          w.__phishingVisibilityHook = true;
+          w.document.addEventListener("visibilitychange", function () {{
+            if (w.document.visibilityState === "visible") {{
+              w.__phishingCheckDailyNotify();
+              w.__phishingCatchUpMissed();
+            }}
+          }});
+        }}
+
+        w.__phishingSetupNotifyScheduler();
+      }})();
     </script>
     </body></html>
     """
@@ -1692,9 +1848,7 @@ def build_home_alert_widget(
     crime_js = json.dumps(top_crime, ensure_ascii=False)
     how_js = json.dumps(how_detail, ensure_ascii=False)
     count_js = json.dumps(top_count, ensure_ascii=False)
-    icon_js = json.dumps(
-        "https://cdn-icons-png.flaticon.com/512/564/564619.png", ensure_ascii=False
-    )
+    icon_js = json.dumps(NOTIFICATION_ICON_URL, ensure_ascii=False)
     return f"""
     <!DOCTYPE html>
     <html>
@@ -1727,8 +1881,9 @@ def build_home_alert_widget(
           (<span id="count"></span>회)
         </p>
         <p class="how"><strong>범행 진행:</strong> <span id="how"></span></p>
-        <p>알림 동의 시 <strong>매일 2회</strong>(<strong>새벽 2:10</strong>, <strong>오후 2:10</strong>) OS 팝업으로 주의보를 받을 수 있습니다. (브라우저/바탕화면 앱이 켜져 있어야 발송)</p>
+        <p>알림 동의 후 <strong>홈 화면에 추가</strong>한 앱으로 실행하세요. 새벽 <strong>2:18</strong>·오후 <strong>2:10</strong>에 발송되며, 놓친 경우 <strong>앱을 열면 보완 발송</strong>됩니다.</p>
         <button id="btn" type="button">🔔 알림 동의 (매일 2회)</button>
+        <button id="testBtn" type="button" style="margin-left:8px;background:#fee2e2;">🔔 지금 테스트</button>
         <span id="status"></span>
       </div>
       <script>
@@ -1763,34 +1918,24 @@ def build_home_alert_widget(
           const w = hostWindow();
           try {{
             w.localStorage.setItem(PAYLOAD_KEY, JSON.stringify(buildPayload()));
-            if (w.navigator.serviceWorker && w.navigator.serviceWorker.controller) {{
-              w.navigator.serviceWorker.controller.postMessage({{
-                type: "SAVE_NOTIFY_CONFIG",
-                consent: w.localStorage.getItem(CONSENT_KEY) || "0",
-                payload: buildPayload(),
-              }});
+            if (typeof w.__phishingSetupNotifyScheduler === "function") {{
+              w.__phishingSetupNotifyScheduler();
             }}
           }} catch (e) {{}}
         }}
 
-        async function registerBackgroundDaily(w) {{
-          if (!("serviceWorker" in w.navigator)) return;
-          try {{
-            const reg = await w.navigator.serviceWorker.register("/static/phishing-sw.js");
-            await reg.update();
-            reg.active?.postMessage({{
-              type: "SAVE_NOTIFY_CONFIG",
-              consent: "1",
-              payload: buildPayload(),
-            }});
-            if ("periodicSync" in reg) {{
-              try {{
-                await reg.periodicSync.register("phishing-daily", {{
-                  minInterval: 24 * 60 * 60 * 1000,
-                }});
-              }} catch (e) {{}}
-            }}
-          }} catch (e) {{}}
+        function showSetupStatus(w) {{
+          const pwa = typeof w.__phishingIsStandalone === "function" && w.__phishingIsStandalone();
+          const mode = pwa ? "홈 화면 앱" : "브라우저";
+          if (w.localStorage.getItem(CONSENT_KEY) === "1") {{
+            const next = typeof w.__phishingGetNextNotifyLabel === "function"
+              ? w.__phishingGetNextNotifyLabel()
+              : "02:18 · 14:10";
+            statusEl.textContent = "✅ [" + mode + "] 알림 동의됨 · 다음: " + next
+              + " · 놓친 알림은 앱을 열면 보완 발송";
+          }} else {{
+            statusEl.textContent = "[" + mode + "] [알림 동의] 후 홈 화면 앱으로 실행하세요. [지금 테스트]로 확인.";
+          }}
         }}
 
         function enableDailyNotification() {{
@@ -1804,11 +1949,15 @@ def build_home_alert_widget(
             try {{
               w.localStorage.setItem(CONSENT_KEY, "1");
               savePayloadSilently();
-              await registerBackgroundDaily(w);
-              if (typeof w.__phishingCheckDailyNotify === "function") {{
-                w.__phishingDailySchedulerReady = true;
+              if (typeof w.__phishingSetupNotifyScheduler === "function") {{
+                w.__phishingSetupNotifyScheduler();
               }}
-              statusEl.textContent = "✅ 알림 동의 완료. 매일 2회(새벽 2:10 · 오후 2:10) OS 팝업으로 발송됩니다.";
+              new w.Notification("피싱 주의보 알림 설정 완료", {{
+                body: "매일 새벽 2:18 · 오후 2:10에 주의보가 발송됩니다.",
+                icon: icon,
+                tag: "phishing-setup-ok",
+              }});
+              showSetupStatus(w);
             }} catch (err) {{
               statusEl.textContent = "설정 저장 실패: " + err;
             }}
@@ -1826,20 +1975,39 @@ def build_home_alert_widget(
           }}
         }}
 
-        document.getElementById("btn").addEventListener("click", enableDailyNotification);
-
-        // 최신 주의보 내용만 저장하고, 앱 실행 시 알림은 띄우지 않음
-        savePayloadSilently();
-        try {{
+        function testNotification() {{
           const w = hostWindow();
-          if (w.localStorage.getItem(CONSENT_KEY) === "1") {{
-            statusEl.textContent = "알림 동의 상태입니다. 매일 2회(새벽 2:10 · 오후 2:10) 발송됩니다.";
-          }} else {{
-            statusEl.textContent = "알림을 받으려면 위 버튼을 눌러 동의해 주세요.";
+          if (!("Notification" in w)) {{
+            statusEl.textContent = "이 브라우저는 시스템 알림을 지원하지 않습니다.";
+            return;
           }}
-        }} catch (e) {{
-          statusEl.textContent = "알림을 받으려면 위 버튼을 눌러 동의해 주세요.";
+          const show = () => {{
+            savePayloadSilently();
+            new w.Notification(title, {{
+              body: body,
+              icon: icon,
+              tag: "phishing-test-" + Date.now(),
+              requireInteraction: true,
+            }});
+            statusEl.textContent = "✅ 테스트 알림을 보냈습니다. 팝업이 보이면 설정이 정상입니다.";
+          }};
+          if (w.Notification.permission === "granted") {{
+            show();
+          }} else if (w.Notification.permission === "denied") {{
+            statusEl.textContent = "알림이 차단되어 있습니다. 브라우저 설정에서 허용해 주세요.";
+          }} else {{
+            w.Notification.requestPermission().then((permission) => {{
+              if (permission === "granted") show();
+              else statusEl.textContent = "알림 권한이 거부되었습니다.";
+            }});
+          }}
         }}
+
+        document.getElementById("btn").addEventListener("click", enableDailyNotification);
+        document.getElementById("testBtn").addEventListener("click", testNotification);
+
+        savePayloadSilently();
+        showSetupStatus(hostWindow());
       </script>
     </body>
     </html>
@@ -2066,6 +2234,7 @@ st.write(
     f"{SEED_SEARCH_LABEL} 피싱·사기 관련 뉴스를 넓게 수집한 뒤, "
     "실제 피해·범행 사례가 드러나는 기사 위주로 정리해 주의보와 예방 정보를 안내합니다."
 )
+st.caption("뉴스 검색 제공: NAVER Developers · 검색 API")
 
 # 주의보는 키워드 분석 1위 우선, 없으면 기존 수법 카운터
 if derived_keywords:
@@ -2090,7 +2259,7 @@ if derived_keywords:
             alert["how"],
             alert["count"],
         ),
-        height=240,
+        height=300,
     )
 elif crime_counter:
     top_crime, top_count = crime_counter.most_common(1)[0]
@@ -2114,7 +2283,7 @@ elif crime_counter:
             alert["how"],
             alert["count"],
         ),
-        height=240,
+        height=300,
     )
 else:
     st.success("🟢 최근 한 달간 특별히 급증하는 특정 피싱 키워드는 탐지되지 않았습니다.")
@@ -2211,6 +2380,11 @@ else:
     st.info("피싱 사기 관련 전체 스크랩 기사가 없습니다.")
 
 st.caption(
-    "본 서비스는 공개 뉴스 키워드·요약문 분석 기반 예방 안내용이며, "
-    "수사기관 공식 경보를 대체하지 않습니다. 의심 시 112로 신고하세요."
+    "본 서비스는 공개 뉴스 키워드·요약문 분석 기반 **범죄 예방 안내용**이며, "
+    "수사기관 공식 경보·긴급 통보를 대체하지 않습니다."
 )
+st.caption(
+    "기사 **제목·요약**은 네이버 검색 API를 통해 제공되며, **저작권은 각 언론사**에 있습니다. "
+    "기사 전문은 원문 링크를 통해 해당 언론사에서 열람해 주세요."
+)
+st.caption("무단 복제·전재·배포를 금지하며, 의심 정황은 **112** 또는 **182**로 신고해 주세요.")
