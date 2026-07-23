@@ -1,6 +1,5 @@
 import html
 import json
-import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta
@@ -31,6 +30,8 @@ if "moa_last_picked" not in st.session_state:
 
 # 피싱 주의보 키워드 집계 기간 (일)
 ALERT_LOOKBACK_DAYS = 14
+# 네이버 검색 API 결과 캐시 (초) — 새로고침·버튼 클릭마다 API를 다시 부르지 않도록
+NAVER_API_CACHE_TTL = 600
 
 st.markdown(
     """
@@ -310,19 +311,6 @@ st.markdown(
       font-weight: 600;
       margin: 0.1rem 0 0.55rem;
     }
-    .pwa-install-box {
-      background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
-      border: 1px solid #fdba74;
-      border-radius: 12px;
-      padding: 0.85rem 1rem;
-      margin: 0.75rem 0 0.35rem;
-      color: #7c2d12;
-      font-size: 0.92rem;
-      line-height: 1.55;
-    }
-    .pwa-install-box strong { color: #9a3412; }
-    .pwa-install-steps { margin: 0.45rem 0 0; padding-left: 1.1rem; }
-    .pwa-install-steps li { margin: 0.2rem 0; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -385,50 +373,6 @@ components.html(
       w.addEventListener("load", scheduleFit);
       scheduleFit();
       new w.MutationObserver(scheduleFit).observe(doc.body, { childList: true, subtree: true });
-    })();
-    </script>
-    """,
-    height=0,
-)
-
-components.html(
-    """
-    <script>
-    (function () {
-      const doc = window.parent && window.parent.document ? window.parent.document : document;
-      if (doc.getElementById("pwa-head-injected")) return;
-
-      const marker = doc.createElement("meta");
-      marker.id = "pwa-head-injected";
-      doc.head.appendChild(marker);
-
-      const manifest = doc.createElement("link");
-      manifest.rel = "manifest";
-      manifest.href = "/manifest.webmanifest";
-      doc.head.appendChild(manifest);
-
-      const metas = [
-        ["mobile-web-app-capable", "yes"],
-        ["apple-mobile-web-app-capable", "yes"],
-        ["apple-mobile-web-app-status-bar-style", "black-translucent"],
-        ["apple-mobile-web-app-title", "피싱 Moa"],
-        ["theme-color", "#b91c1c"],
-      ];
-      metas.forEach(function (pair) {
-        const meta = doc.createElement("meta");
-        meta.name = pair[0];
-        meta.content = pair[1];
-        doc.head.appendChild(meta);
-      });
-
-      const icon = doc.createElement("link");
-      icon.rel = "apple-touch-icon";
-      icon.href = "/icons/icon.svg";
-      doc.head.appendChild(icon);
-
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});
-      }
     })();
     </script>
     """,
@@ -932,138 +876,6 @@ def render_phishing_alert_block(alert: dict) -> None:
     )
 
 
-def post_alert_snapshot(alert: dict) -> None:
-    """게이트웨이에 현재 주의보 스냅샷을 전달해 푸시 알림에 활용합니다."""
-    origin = os.environ.get("GATEWAY_PUBLIC_ORIGIN", "").rstrip("/")
-    if not origin:
-        return
-    payload = {
-        "keyword": alert.get("keyword"),
-        "count": alert.get("count"),
-        "how": alert.get("how_full") or alert.get("how"),
-        "watch": alert.get("watch"),
-    }
-    try:
-        requests.post(f"{origin}/api/alert/snapshot", json=payload, timeout=2)
-    except requests.RequestException:
-        pass
-
-
-def render_pwa_install_block() -> None:
-    """홈 화면 추가(PWA) 안내."""
-    st.markdown(
-        """
-        <div class="pwa-install-box">
-          <strong>📲 앱처럼 쓰기 — 홈 화면에 추가</strong>
-          <ol class="pwa-install-steps">
-            <li><strong>Android Chrome</strong>: 메뉴(⋮) → 「홈 화면에 추가」</li>
-            <li><strong>iPhone Safari</strong>: 공유(□↑) → 「홈 화면에 추가」</li>
-            <li>추가 후 아이콘으로 열면 주소창 없이 전체 화면으로 실행됩니다.</li>
-          </ol>
-          <span>※ PWA·푸시 알림은 <strong>http://127.0.0.1:8080</strong> (run_app.py)으로 접속할 때 동작합니다.</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_push_subscribe_block(alert: dict | None) -> None:
-    """Web Push 구독 UI."""
-    alert_json = json.dumps(
-        {
-            "keyword": (alert or {}).get("keyword", ""),
-            "count": (alert or {}).get("count", 0),
-        },
-        ensure_ascii=False,
-    )
-    components.html(
-        f"""
-        <div style="font-family:sans-serif;padding:0.2rem 0 0.4rem;">
-          <p style="margin:0 0 0.55rem;color:#334155;font-size:0.92rem;line-height:1.5;">
-            <strong>🔔 피싱 주의보 푸시</strong> — 키워드가 바뀌거나 매일 <strong>02:00</strong>에 알림을 보냅니다.
-            (브라우저·앱을 완전히 종료해도 서버에서 발송)
-          </p>
-          <button id="pushSubBtn" type="button" style="background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:0.55rem 0.9rem;font-weight:700;cursor:pointer;">
-            🔔 주의보 푸시 구독
-          </button>
-          <button id="pushTestBtn" type="button" style="margin-left:8px;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:8px;padding:0.55rem 0.9rem;font-weight:700;cursor:pointer;">
-            테스트 알림
-          </button>
-          <span id="pushStatus" style="margin-left:8px;font-size:0.86rem;color:#475569;"></span>
-        </div>
-        <script>
-        (function () {{
-          const alertInfo = {alert_json};
-
-          function urlBase64ToUint8Array(base64String) {{
-            const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-            const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-            const raw = atob(base64);
-            const arr = new Uint8Array(raw.length);
-            for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-            return arr;
-          }}
-
-          async function ensureServiceWorker() {{
-            if (!("serviceWorker" in navigator)) throw new Error("Service Worker 미지원");
-            return navigator.serviceWorker.register("/sw.js", {{ scope: "/" }});
-          }}
-
-          async function subscribePush() {{
-            const status = document.getElementById("pushStatus");
-            status.textContent = "구독 중…";
-            await ensureServiceWorker();
-            const permission = await Notification.requestPermission();
-            if (permission !== "granted") throw new Error("알림 권한이 필요합니다.");
-
-            const keyResp = await fetch("/api/push/vapid-public-key");
-            if (!keyResp.ok) throw new Error("VAPID 공개키를 불러오지 못했습니다.");
-            const keyData = await keyResp.json();
-
-            const reg = await navigator.serviceWorker.ready;
-            let sub = await reg.pushManager.getSubscription();
-            if (!sub) {{
-              sub = await reg.pushManager.subscribe({{
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(keyData.publicKey),
-              }});
-            }}
-
-            const resp = await fetch("/api/push/subscribe", {{
-              method: "POST",
-              headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify(sub),
-            }});
-            if (!resp.ok) throw new Error("구독 저장 실패");
-            status.textContent = "✅ 푸시 구독 완료";
-          }}
-
-          async function testPush() {{
-            const status = document.getElementById("pushStatus");
-            status.textContent = "테스트 발송 중…";
-            const resp = await fetch("/api/push/test", {{ method: "POST" }});
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || "테스트 실패");
-            status.textContent = data.sent ? "✅ 테스트 알림 발송" : "구독자 없음 또는 변경 없음";
-          }}
-
-          document.getElementById("pushSubBtn").addEventListener("click", function () {{
-            subscribePush().catch(function (err) {{
-              document.getElementById("pushStatus").textContent = "❌ " + err.message;
-            }});
-          }});
-          document.getElementById("pushTestBtn").addEventListener("click", function () {{
-            testPush().catch(function (err) {{
-              document.getElementById("pushStatus").textContent = "❌ " + err.message;
-            }});
-          }});
-        }})();
-        </script>
-        """,
-        height=120,
-    )
-
-
 def render_backseo_section_header(article_count: int) -> None:
     """피싱 범죄 백서 섹션 헤더."""
     count_html = (
@@ -1140,6 +952,20 @@ def get_naver_credentials():
     ):
         return None, None
     return client_id, client_secret
+
+
+def format_naver_search_error(query: str, exc: requests.HTTPError) -> str:
+    status = exc.response.status_code if exc.response is not None else "?"
+    if status == 429:
+        return (
+            f"「{query}」 일일 API 호출 한도 초과 (HTTP 429). "
+            "네이버 개발자센터 할당량을 확인하거나 내일 0시 이후 다시 시도하세요."
+        )
+    if status in (401, 403):
+        return f"「{query}」 API 인증 오류 (HTTP {status}) — Client ID/Secret을 확인하세요."
+    if status >= 500:
+        return f"「{query}」 네이버 서버 일시 오류 (HTTP {status})"
+    return f"「{query}」 검색 실패 (HTTP {status})"
 
 
 def clean_html_text(text: str) -> str:
@@ -2134,6 +1960,8 @@ GENERIC_SEED_EXCLUDE = {
     "사기",
 }
 PRIMARY_RESEARCH_SEEDS = ("피싱", "보이스피싱", "금융사기")
+# 3단계 재검색 — 키워드 수·쿼리 수 (API 호출 절감)
+RESEARCH_KEYWORD_TOP_N = 5
 INVESTIGATION_ONLY_MARKERS = (
     "검거",
     "송치",
@@ -2226,7 +2054,7 @@ def filter_keywords_for_research(keyword_rank: list[tuple[str, int]]) -> list[st
         if keyword.lower() in _INVESTIGATION_EXCLUDED_LOWER:
             continue
         selected.append(keyword)
-        if len(selected) >= 10:
+        if len(selected) >= RESEARCH_KEYWORD_TOP_N:
             break
     return selected
 
@@ -2416,6 +2244,7 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
     }
 
 
+@st.cache_data(ttl=NAVER_API_CACHE_TTL, show_spinner=False)
 def fetch_moa_keyword_news(
     client_id: str, client_secret: str, keyword: str, _cache_ver: int = 1
 ) -> tuple[list[dict], str | None]:
@@ -2435,8 +2264,7 @@ def fetch_moa_keyword_news(
         res.raise_for_status()
         raw_items = res.json().get("items", [])
     except requests.HTTPError as e:
-        status = e.response.status_code if e.response is not None else "?"
-        return [], f"「{keyword}」 검색 실패 (HTTP {status})"
+        return [], format_naver_search_error(keyword, e)
     except requests.RequestException as e:
         return [], f"「{keyword}」 네트워크 오류: {e}"
 
@@ -2490,11 +2318,12 @@ def fetch_moa_keyword_news(
     return articles, None
 
 
-def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 28):
+@st.cache_data(ttl=NAVER_API_CACHE_TTL, show_spinner=False)
+def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 30):
     """
     1) 피싱·보이스피싱·금융사기 등 관련 키워드로 뉴스 전체 수집
     2) 수집 기사 중 범죄 행위·수단이 드러나는 기사만 추려 키워드·주의보 분석
-    3) 행위 키워드로 재검색 후 병합
+    3) 상위 5개 행위 키워드로 재검색 후 병합
     """
     url = "https://openapi.naver.com/v1/search/news.json"
     headers = {
@@ -2513,8 +2342,7 @@ def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 28
             res.raise_for_status()
             return res.json().get("items", []), None
         except requests.HTTPError as e:
-            status = e.response.status_code if e.response is not None else "?"
-            return [], f"'{query}' 검색 실패 (HTTP {status})"
+            return [], format_naver_search_error(query, e)
         except requests.RequestException as e:
             return [], f"'{query}' 네트워크 오류: {e}"
 
@@ -2696,7 +2524,7 @@ if not client_id or not client_secret:
 
 with st.spinner(f"{SEED_SEARCH_LABEL} 피싱·사기 뉴스 수집 및 범죄 행위 분석 중..."):
     news_list, all_news_list, alert_crime_hits, fetch_errors, alert_keywords = (
-        fetch_phishing_news(client_id, client_secret, _cache_ver=28)
+        fetch_phishing_news(client_id, client_secret, _cache_ver=30)
     )
 
 if fetch_errors and not news_list:
@@ -2724,24 +2552,16 @@ st.write(
 )
 st.caption("뉴스 검색: **네이버 OPEN API** (Search API)")
 
-current_alert: dict | None = None
 if alert_keywords:
     top_crime, top_count = alert_keywords[0]
-    current_alert = build_urgent_alert_info(top_crime, top_count, alert_news)
-    render_phishing_alert_block(current_alert)
+    alert = build_urgent_alert_info(top_crime, top_count, alert_news)
+    render_phishing_alert_block(alert)
 elif crime_counter:
     top_crime, top_count = crime_counter.most_common(1)[0]
-    current_alert = build_urgent_alert_info(top_crime, top_count, alert_news)
-    render_phishing_alert_block(current_alert)
+    alert = build_urgent_alert_info(top_crime, top_count, alert_news)
+    render_phishing_alert_block(alert)
 else:
     st.success("🟢 최근 2주간 두드러진 피싱 키워드는 없습니다.")
-
-if current_alert:
-    post_alert_snapshot(current_alert)
-
-with st.expander("📲 앱처럼 쓰기 · 🔔 푸시 알림 설정", expanded=False):
-    render_pwa_install_block()
-    render_push_subscribe_block(current_alert)
 
 st.divider()
 
@@ -2782,9 +2602,9 @@ if news_list:
 
     remaining = len(news_list) - st.session_state.display_count
     if remaining > 0:
-        add_count = min(10, remaining)
+        add_count = min(5, remaining)
         if st.button(f"🔽 수법 기사 더보기 ({add_count}개 추가)", key="more_method"):
-            st.session_state.display_count += 10
+            st.session_state.display_count += 5
             st.rerun()
     else:
         st.caption(f"수법 중심 기사 {len(news_list)}건을 모두 표시했습니다.")
@@ -2876,12 +2696,12 @@ if selected_kw:
 
         remaining_moa = len(moa_articles) - st.session_state.moa_display_count
         if remaining_moa > 0:
-            add_count = min(10, remaining_moa)
+            add_count = min(5, remaining_moa)
             if st.button(
                 f"🔽 「{selected_kw}」 더보기 ({add_count}개 추가)",
                 key=f"moa_more_{selected_kw}",
             ):
-                st.session_state.moa_display_count += 10
+                st.session_state.moa_display_count += 5
                 st.rerun()
         else:
             st.caption(f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다.")
