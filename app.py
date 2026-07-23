@@ -1,10 +1,11 @@
 import html
 import json
+import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import requests
 import streamlit as st
@@ -68,32 +69,6 @@ st.markdown(
         margin-bottom: 0.2rem !important;
       }
     }
-    .phishing-alert-hero {
-      position: relative;
-      overflow: hidden;
-      background: linear-gradient(135deg, #7f1d1d 0%, #b91c1c 52%, #dc2626 100%);
-      border-radius: 12px;
-      padding: 0.75rem 1rem 0.85rem;
-      color: #fff;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 6px 18px rgba(127, 29, 29, 0.28);
-      margin-bottom: 0.65rem;
-      animation: alert-glow 2.4s ease-in-out infinite;
-    }
-    .phishing-alert-hero::after {
-      content: "";
-      position: absolute;
-      top: -40%;
-      right: -20%;
-      width: 55%;
-      height: 140%;
-      background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 68%);
-      pointer-events: none;
-    }
-    @keyframes alert-glow {
-      0%, 100% { box-shadow: 0 6px 18px rgba(127, 29, 29, 0.28); }
-      50% { box-shadow: 0 6px 22px rgba(220, 38, 38, 0.42), 0 0 0 3px rgba(254, 202, 202, 0.2); }
-    }
     .phishing-alert-badge {
       display: inline-flex;
       align-items: center;
@@ -118,30 +93,63 @@ st.markdown(
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.35; transform: scale(0.82); }
     }
-    .phishing-alert-label {
+    @keyframes alert-glow {
+      0%, 100% { box-shadow: 0 6px 18px rgba(127, 29, 29, 0.28); }
+      50% { box-shadow: 0 6px 22px rgba(220, 38, 38, 0.42), 0 0 0 3px rgba(254, 202, 202, 0.2); }
+    }
+    .phishing-alert-hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #7f1d1d 0%, #b91c1c 52%, #dc2626 100%);
+      border-radius: 12px;
+      padding: 0.75rem 1rem 0.85rem;
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 6px 18px rgba(127, 29, 29, 0.28);
+      margin-bottom: 0;
+      animation: alert-glow 2.4s ease-in-out infinite;
+    }
+    .phishing-alert-hero::after {
+      content: "";
+      position: absolute;
+      top: -40%;
+      right: -20%;
+      width: 55%;
+      height: 140%;
+      background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 68%);
+      pointer-events: none;
+    }
+    .phishing-alert-hero .phishing-alert-label {
       font-size: 0.92rem;
       font-weight: 600;
       opacity: 0.92;
       margin-bottom: 0.12rem;
+      color: #fff;
+      text-align: center;
+    }
+    .phishing-alert-hero .phishing-alert-count {
+      color: #fff;
+      margin-top: 0.35rem;
+      margin-bottom: 0;
     }
     .phishing-alert-keyword {
       display: block;
-      font-size: clamp(1.45rem, 5.2vw, 1.9rem);
+      font-size: clamp(1.85rem, 7vw, 2.45rem);
       font-weight: 900;
       line-height: 1.18;
       letter-spacing: -0.025em;
       text-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
-      margin: 0.08rem 0 0.42rem;
+      margin: 0 auto;
+      color: #fff;
+      word-break: keep-all;
+      text-align: center;
     }
-    a.phishing-alert-keyword-link {
-      text-decoration: underline;
-      text-underline-offset: 0.18em;
-      color: #fff !important;
-      cursor: pointer;
+    .phishing-alert-kw-main {
+      text-align: center;
+      margin: 0.08rem 0 0.35rem;
     }
-    a.phishing-alert-keyword-link:hover {
-      opacity: 0.88;
-      color: #fff !important;
+    div[data-testid="stMarkdown"]:has(.phishing-alert-hero) {
+      margin-bottom: 0 !important;
     }
     .phishing-alert-count {
       display: inline-block;
@@ -154,6 +162,10 @@ st.markdown(
       font-weight: 700;
       margin-bottom: 0;
     }
+    .phishing-alert-count-wrap {
+      text-align: center;
+      margin-top: 0.35rem;
+    }
     .phishing-alert-desc {
       margin: 0.2rem 0 0.65rem;
       font-size: 0.98rem;
@@ -165,6 +177,7 @@ st.markdown(
       border-left: 4px solid #ea580c;
       border-radius: 0 10px 10px 0;
       padding: 0.75rem 0.9rem;
+      margin-top: 0.75rem;
       margin-bottom: 0.65rem;
       font-size: 0.95rem;
       line-height: 1.55;
@@ -181,6 +194,11 @@ st.markdown(
     }
     .phishing-alert-watch strong {
       color: #1d4ed8;
+    }
+    .phishing-app-analysis-block {
+      border-top: 1px dashed #d1d5db;
+      margin-top: 0.55rem;
+      padding-top: 0.55rem;
     }
     .phishing-backseo-hero {
       background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 52%, #2563eb 100%);
@@ -292,6 +310,19 @@ st.markdown(
       font-weight: 600;
       margin: 0.1rem 0 0.55rem;
     }
+    .pwa-install-box {
+      background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
+      border: 1px solid #fdba74;
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      margin: 0.75rem 0 0.35rem;
+      color: #7c2d12;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+    .pwa-install-box strong { color: #9a3412; }
+    .pwa-install-steps { margin: 0.45rem 0 0; padding-left: 1.1rem; }
+    .pwa-install-steps li { margin: 0.2rem 0; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -354,6 +385,50 @@ components.html(
       w.addEventListener("load", scheduleFit);
       scheduleFit();
       new w.MutationObserver(scheduleFit).observe(doc.body, { childList: true, subtree: true });
+    })();
+    </script>
+    """,
+    height=0,
+)
+
+components.html(
+    """
+    <script>
+    (function () {
+      const doc = window.parent && window.parent.document ? window.parent.document : document;
+      if (doc.getElementById("pwa-head-injected")) return;
+
+      const marker = doc.createElement("meta");
+      marker.id = "pwa-head-injected";
+      doc.head.appendChild(marker);
+
+      const manifest = doc.createElement("link");
+      manifest.rel = "manifest";
+      manifest.href = "/manifest.webmanifest";
+      doc.head.appendChild(manifest);
+
+      const metas = [
+        ["mobile-web-app-capable", "yes"],
+        ["apple-mobile-web-app-capable", "yes"],
+        ["apple-mobile-web-app-status-bar-style", "black-translucent"],
+        ["apple-mobile-web-app-title", "피싱 Moa"],
+        ["theme-color", "#b91c1c"],
+      ];
+      metas.forEach(function (pair) {
+        const meta = doc.createElement("meta");
+        meta.name = pair[0];
+        meta.content = pair[1];
+        doc.head.appendChild(meta);
+      });
+
+      const icon = doc.createElement("link");
+      icon.rel = "apple-touch-icon";
+      icon.href = "/icons/icon.svg";
+      doc.head.appendChild(icon);
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});
+      }
     })();
     </script>
     """,
@@ -799,22 +874,29 @@ def build_urgent_alert_info(
     }
 
 
+
+
+
+def render_naver_api_attribution() -> None:
+    """네이버 OPEN API 검색 결과 표기 (이용약관 준수)."""
+    st.caption(
+        "📰 **네이버 OPEN API** 검색 결과 · 제목·요약 저작권은 각 언론사에 있습니다."
+    )
+
+
+def render_app_analysis_block(analysis: dict) -> None:
+    """API 검색결과와 구분된 자체 범행 수법 분석 블록."""
+    st.markdown('<div class="phishing-app-analysis-block"></div>', unsafe_allow_html=True)
+    st.markdown(f"**🔎 범행 수법 분석:** {analysis['how_detail']}")
+    if analysis["tactics"]:
+        st.caption("감지된 구체 수단: " + " · ".join(analysis["tactics"]))
+    st.info(f"🛡️ 예방: {analysis['watch']}")
+
+
 def render_phishing_alert_block(alert: dict) -> None:
     """피싱 주의보 — 강조형 카드 UI."""
-    raw_keyword = alert["keyword"]
-    keyword = html.escape(raw_keyword)
+    keyword = html.escape(alert["keyword"])
     count = alert["count"]
-    moa_kw = map_alert_keyword_to_moa(raw_keyword)
-
-    if moa_kw:
-        moa_title = html.escape(moa_kw)
-        keyword_html = (
-            f'<a class="phishing-alert-keyword phishing-alert-keyword-link" '
-            f'href="?alert_moa={quote(moa_kw)}" '
-            f'title="Moa Moa에서 「{moa_title}」 관련 최신 기사 보기">{keyword}</a>'
-        )
-    else:
-        keyword_html = f'<div class="phishing-alert-keyword">{keyword}</div>'
 
     how_html = html.escape(alert["how_full"]).replace("\n", "<br>")
     watch_html = ""
@@ -824,6 +906,11 @@ def render_phishing_alert_block(alert: dict) -> None:
             f'<div class="phishing-alert-watch"><strong>🛡️ 예방 포인트</strong><br>{watch}</div>'
         )
 
+    how_section = (
+        f'<div class="phishing-alert-how"><strong>🔎 범행 진행 방식</strong><br>{how_html}</div>'
+        f"{watch_html}"
+    )
+
     st.markdown(
         f"""
         <div class="phishing-alert-hero">
@@ -832,13 +919,148 @@ def render_phishing_alert_block(alert: dict) -> None:
             🚨 피싱 주의보 · LIVE
           </div>
           <div class="phishing-alert-label">최근 피싱범죄 주의 키워드</div>
-          {keyword_html}
-          <p class="phishing-alert-count">최근 2주 · {count}회 언급</p>
+          <div class="phishing-alert-kw-main">
+            <div class="phishing-alert-keyword">{keyword}</div>
+          </div>
+          <div class="phishing-alert-count-wrap">
+            <p class="phishing-alert-count">최근 2주 · {count}회 언급</p>
+          </div>
         </div>
-        <div class="phishing-alert-how"><strong>🔎 범행 진행 방식</strong><br>{how_html}</div>
-        {watch_html}
+        {how_section}
         """,
         unsafe_allow_html=True,
+    )
+
+
+def post_alert_snapshot(alert: dict) -> None:
+    """게이트웨이에 현재 주의보 스냅샷을 전달해 푸시 알림에 활용합니다."""
+    origin = os.environ.get("GATEWAY_PUBLIC_ORIGIN", "").rstrip("/")
+    if not origin:
+        return
+    payload = {
+        "keyword": alert.get("keyword"),
+        "count": alert.get("count"),
+        "how": alert.get("how_full") or alert.get("how"),
+        "watch": alert.get("watch"),
+    }
+    try:
+        requests.post(f"{origin}/api/alert/snapshot", json=payload, timeout=2)
+    except requests.RequestException:
+        pass
+
+
+def render_pwa_install_block() -> None:
+    """홈 화면 추가(PWA) 안내."""
+    st.markdown(
+        """
+        <div class="pwa-install-box">
+          <strong>📲 앱처럼 쓰기 — 홈 화면에 추가</strong>
+          <ol class="pwa-install-steps">
+            <li><strong>Android Chrome</strong>: 메뉴(⋮) → 「홈 화면에 추가」</li>
+            <li><strong>iPhone Safari</strong>: 공유(□↑) → 「홈 화면에 추가」</li>
+            <li>추가 후 아이콘으로 열면 주소창 없이 전체 화면으로 실행됩니다.</li>
+          </ol>
+          <span>※ PWA·푸시 알림은 <strong>http://127.0.0.1:8080</strong> (run_app.py)으로 접속할 때 동작합니다.</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_push_subscribe_block(alert: dict | None) -> None:
+    """Web Push 구독 UI."""
+    alert_json = json.dumps(
+        {
+            "keyword": (alert or {}).get("keyword", ""),
+            "count": (alert or {}).get("count", 0),
+        },
+        ensure_ascii=False,
+    )
+    components.html(
+        f"""
+        <div style="font-family:sans-serif;padding:0.2rem 0 0.4rem;">
+          <p style="margin:0 0 0.55rem;color:#334155;font-size:0.92rem;line-height:1.5;">
+            <strong>🔔 피싱 주의보 푸시</strong> — 키워드가 바뀌거나 매일 <strong>02:00</strong>에 알림을 보냅니다.
+            (브라우저·앱을 완전히 종료해도 서버에서 발송)
+          </p>
+          <button id="pushSubBtn" type="button" style="background:#b91c1c;color:#fff;border:none;border-radius:8px;padding:0.55rem 0.9rem;font-weight:700;cursor:pointer;">
+            🔔 주의보 푸시 구독
+          </button>
+          <button id="pushTestBtn" type="button" style="margin-left:8px;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:8px;padding:0.55rem 0.9rem;font-weight:700;cursor:pointer;">
+            테스트 알림
+          </button>
+          <span id="pushStatus" style="margin-left:8px;font-size:0.86rem;color:#475569;"></span>
+        </div>
+        <script>
+        (function () {{
+          const alertInfo = {alert_json};
+
+          function urlBase64ToUint8Array(base64String) {{
+            const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+            const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+            const raw = atob(base64);
+            const arr = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+            return arr;
+          }}
+
+          async function ensureServiceWorker() {{
+            if (!("serviceWorker" in navigator)) throw new Error("Service Worker 미지원");
+            return navigator.serviceWorker.register("/sw.js", {{ scope: "/" }});
+          }}
+
+          async function subscribePush() {{
+            const status = document.getElementById("pushStatus");
+            status.textContent = "구독 중…";
+            await ensureServiceWorker();
+            const permission = await Notification.requestPermission();
+            if (permission !== "granted") throw new Error("알림 권한이 필요합니다.");
+
+            const keyResp = await fetch("/api/push/vapid-public-key");
+            if (!keyResp.ok) throw new Error("VAPID 공개키를 불러오지 못했습니다.");
+            const keyData = await keyResp.json();
+
+            const reg = await navigator.serviceWorker.ready;
+            let sub = await reg.pushManager.getSubscription();
+            if (!sub) {{
+              sub = await reg.pushManager.subscribe({{
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(keyData.publicKey),
+              }});
+            }}
+
+            const resp = await fetch("/api/push/subscribe", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify(sub),
+            }});
+            if (!resp.ok) throw new Error("구독 저장 실패");
+            status.textContent = "✅ 푸시 구독 완료";
+          }}
+
+          async function testPush() {{
+            const status = document.getElementById("pushStatus");
+            status.textContent = "테스트 발송 중…";
+            const resp = await fetch("/api/push/test", {{ method: "POST" }});
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || "테스트 실패");
+            status.textContent = data.sent ? "✅ 테스트 알림 발송" : "구독자 없음 또는 변경 없음";
+          }}
+
+          document.getElementById("pushSubBtn").addEventListener("click", function () {{
+            subscribePush().catch(function (err) {{
+              document.getElementById("pushStatus").textContent = "❌ " + err.message;
+            }});
+          }});
+          document.getElementById("pushTestBtn").addEventListener("click", function () {{
+            testPush().catch(function (err) {{
+              document.getElementById("pushStatus").textContent = "❌ " + err.message;
+            }});
+          }});
+        }})();
+        </script>
+        """,
+        height=120,
     )
 
 
@@ -852,7 +1074,7 @@ def render_backseo_section_header(article_count: int) -> None:
     st.markdown(
         f"""
         <div class="phishing-backseo-hero">
-          <div class="phishing-backseo-title">미리 알고 대비하는 피싱 범죄 백서</div>
+          <div class="phishing-backseo-title">피싱 수법 Moa Moa</div>
           <div class="phishing-backseo-sub">
             실제 피해·범행 사례가 확인된 기사만 찾아
             사칭·편취·계좌이체 등 구체적 수법과 예방법을 정리했습니다.
@@ -2194,7 +2416,6 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
     }
 
 
-@st.cache_data(ttl=600, show_spinner=False)
 def fetch_moa_keyword_news(
     client_id: str, client_secret: str, keyword: str, _cache_ver: int = 1
 ) -> tuple[list[dict], str | None]:
@@ -2269,7 +2490,6 @@ def fetch_moa_keyword_news(
     return articles, None
 
 
-@st.cache_data(ttl=600, show_spinner=False)
 def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 28):
     """
     1) 피싱·보이스피싱·금융사기 등 관련 키워드로 뉴스 전체 수집
@@ -2494,7 +2714,7 @@ alert_news = [n for n in news_list if n.get("datetime") and n["datetime"] >= pas
 # ---------------------------------------------------------------------------
 st.caption("제작 : 광주동부경찰서 범죄예방대응과")
 st.markdown(
-    '<h1 class="phishing-mobile-title">👮‍♂️ 피싱 경보 112👮‍♀️</h1>',
+    '<h1 class="phishing-mobile-title">👮‍♂️피싱 범죄 Moa Moa👮‍♀️</h1>',
     unsafe_allow_html=True,
 )
 st.write(
@@ -2502,31 +2722,26 @@ st.write(
     "실제 범행 수법과 피해 사례를 짚어보고, 이를 바탕으로 한 실질적인 "
     "피싱 주의보와 예방 정보를 안내해 드립니다."
 )
-st.caption("뉴스 검색 제공: NAVER Developers · 검색 API")
+st.caption("뉴스 검색: **네이버 OPEN API** (Search API)")
 
-_alert_moa_qp = st.query_params.get("alert_moa")
-if _alert_moa_qp:
-    if _alert_moa_qp in MOA_KEYWORDS:
-        st.session_state.moa_alert_target = _alert_moa_qp
-        st.session_state.moa_pick_from_alert = True
-        st.session_state.moa_display_count = 5
-        st.session_state.scroll_to_moa = True
-        st.session_state.moa_just_from_alert = _alert_moa_qp
-        st.session_state.moa_from_alert_nav = True
-    if "alert_moa" in st.query_params:
-        del st.query_params["alert_moa"]
-    st.rerun()
-
+current_alert: dict | None = None
 if alert_keywords:
     top_crime, top_count = alert_keywords[0]
-    alert = build_urgent_alert_info(top_crime, top_count, alert_news)
-    render_phishing_alert_block(alert)
+    current_alert = build_urgent_alert_info(top_crime, top_count, alert_news)
+    render_phishing_alert_block(current_alert)
 elif crime_counter:
     top_crime, top_count = crime_counter.most_common(1)[0]
-    alert = build_urgent_alert_info(top_crime, top_count, alert_news)
-    render_phishing_alert_block(alert)
+    current_alert = build_urgent_alert_info(top_crime, top_count, alert_news)
+    render_phishing_alert_block(current_alert)
 else:
     st.success("🟢 최근 2주간 두드러진 피싱 키워드는 없습니다.")
+
+if current_alert:
+    post_alert_snapshot(current_alert)
+
+with st.expander("📲 앱처럼 쓰기 · 🔔 푸시 알림 설정", expanded=False):
+    render_pwa_install_block()
+    render_push_subscribe_block(current_alert)
 
 st.divider()
 
@@ -2536,6 +2751,10 @@ st.divider()
 render_backseo_section_header(len(news_list) if news_list else 0)
 
 if news_list:
+    render_naver_api_attribution()
+    st.caption(
+        "※ 각 기사 아래 **범행 수법 분석·예방**은 본 서비스가 공개 요약을 바탕으로 자동 정리한 내용입니다."
+    )
     st.markdown(
         '<p class="phishing-backseo-card-label">최신 수법·피해 사례</p>',
         unsafe_allow_html=True,
@@ -2559,10 +2778,7 @@ if news_list:
             if analysis.get("snippet"):
                 st.write(analysis["snippet"])
 
-            st.markdown(f"**🔎 범행 수법 분석:** {analysis['how_detail']}")
-            if analysis["tactics"]:
-                st.caption("감지된 구체 수단: " + " · ".join(analysis["tactics"]))
-            st.info(f"🛡️ 예방: {analysis['watch']}")
+            render_app_analysis_block(analysis)
 
     remaining = len(news_list) - st.session_state.display_count
     if remaining > 0:
@@ -2588,15 +2804,12 @@ if st.session_state.pop("moa_pick_from_alert", False):
 
 if st.session_state.pop("scroll_to_moa", False):
     components.html(
-        """
-        <script>
-        (function () {
-          const w = window.parent && window.parent.document ? window.parent : window;
-          const el = w.document.getElementById("moa-section");
-          if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); }
-        })();
-        </script>
-        """,
+        "<script>"
+        "(function(){const d=window.parent.document;"
+        "const el=d.getElementById('moa-section');"
+        "if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}"
+        "})();"
+        "</script>",
         height=0,
     )
 
@@ -2607,9 +2820,6 @@ st.markdown(
     '<p class="phishing-moa-picker-hint">📌 수법·유형 키워드를 선택해 주세요</p>',
     unsafe_allow_html=True,
 )
-
-if st.session_state.pop("moa_just_from_alert", None):
-    st.success("주의보 키워드로 Moa Moa 검색 결과를 불러왔습니다.")
 
 picked = st.selectbox(
     "키워드",
@@ -2645,7 +2855,10 @@ if selected_kw:
                 f"{len(moa_articles)}건</p>",
                 unsafe_allow_html=True,
             )
+        else:
+            st.session_state.pop("moa_from_alert_nav", None)
         visible = moa_articles[: st.session_state.moa_display_count]
+        render_naver_api_attribution()
         for idx, news in enumerate(visible, 1):
             kw_label = (
                 " · ".join(news["keywords"])
@@ -2671,17 +2884,16 @@ if selected_kw:
                 st.session_state.moa_display_count += 10
                 st.rerun()
         else:
-            if not st.session_state.get("moa_from_alert_nav"):
-                st.caption(f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다.")
+            st.caption(f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다.")
     else:
         st.info(f"「{selected_kw}」 관련 기사가 없습니다.")
 
 st.caption(
-    "본 서비스는 공개 뉴스 키워드·요약문 분석 기반 **범죄 예방 안내용**이며, "
-    "수사기관 공식 경보·긴급 통보를 대체하지 않습니다."
+    "본 서비스는 **민간 범죄 예방 안내용**이며, 수사기관·금융당국의 공식 경보·긴급 통보를 "
+    "대체하지 않습니다."
 )
 st.caption(
-    "기사 **제목·요약**은 네이버 검색 API를 통해 제공되며, **저작권은 각 언론사**에 있습니다. "
+    "기사 **제목·요약**은 **네이버 OPEN API** 검색 결과이며, **저작권은 각 언론사**에 있습니다. "
     "기사 전문은 원문 링크를 통해 해당 언론사에서 열람해 주세요."
 )
 st.caption("무단 복제·전재·배포를 금지하며, 의심 정황은 **112** 또는 **1332**로 신고해 주세요.")
