@@ -32,6 +32,25 @@ if "moa_last_picked" not in st.session_state:
 ALERT_LOOKBACK_DAYS = 14
 # 네이버 검색 API 결과 캐시 (초) — 새로고침·버튼 클릭마다 API를 다시 부르지 않도록
 NAVER_API_CACHE_TTL = 1800
+# NAVER API Hub (콘솔: console.ncloud.com/naver-api-hub) — 구 openapi.naver.com 과 URL·헤더가 다름
+NAVER_NEWS_SEARCH_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
+
+
+def naver_news_search_headers(client_id: str, client_secret: str) -> dict[str, str]:
+    return {
+        "X-NCP-APIGW-API-KEY-ID": client_id,
+        "X-NCP-APIGW-API-KEY": client_secret,
+    }
+
+
+def naver_news_search_params(query: str, display: int, start: int = 1) -> dict:
+    return {
+        "query": query,
+        "display": display,
+        "start": start,
+        "sort": "date",
+        "format": "json",
+    }
 
 st.markdown(
     """
@@ -2481,19 +2500,14 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
 
 @st.cache_data(ttl=NAVER_API_CACHE_TTL, show_spinner=False)
 def fetch_moa_keyword_news(
-    client_id: str, client_secret: str, keyword: str, _cache_ver: int = 4
+    client_id: str, client_secret: str, keyword: str, _cache_ver: int = 5
 ) -> tuple[list[dict], str | None]:
     """Da Moa — 키워드 1개당 네이버 API 1회 호출 (최대 100건, 키워드 연관 기사 전체)."""
-    url = "https://openapi.naver.com/v1/search/news.json"
-    headers = {
-        "X-Naver-Client-Id": client_id,
-        "X-Naver-Client-Secret": client_secret,
-    }
     try:
         res = requests.get(
-            url,
-            headers=headers,
-            params={"query": keyword, "display": 100, "start": 1, "sort": "date"},
+            NAVER_NEWS_SEARCH_URL,
+            headers=naver_news_search_headers(client_id, client_secret),
+            params=naver_news_search_params(keyword, display=100),
             timeout=10,
         )
         res.raise_for_status()
@@ -2545,24 +2559,20 @@ def fetch_moa_keyword_news(
 
 
 @st.cache_data(ttl=NAVER_API_CACHE_TTL, show_spinner=False)
-def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 44):
+def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 45):
     """
     1) 피싱·보이스피싱·금융사기 등 관련 키워드로 뉴스 전체 수집
     2) 수집 기사 중 범죄 행위·수단이 드러나는 기사만 추려 키워드·주의보 분석
     3) 상위 5개 행위 키워드로 재검색 후 병합
     """
-    url = "https://openapi.naver.com/v1/search/news.json"
-    headers = {
-        "X-Naver-Client-Id": client_id,
-        "X-Naver-Client-Secret": client_secret,
-    }
+    headers = naver_news_search_headers(client_id, client_secret)
 
     def search_news(query: str, display: int = 100) -> tuple[list, str | None]:
         try:
             res = requests.get(
-                url,
+                NAVER_NEWS_SEARCH_URL,
                 headers=headers,
-                params={"query": query, "display": display, "start": 1, "sort": "date"},
+                params=naver_news_search_params(query, display=display),
                 timeout=10,
             )
             res.raise_for_status()
@@ -2763,7 +2773,7 @@ if not client_id or not client_secret:
 
 with st.spinner("보이스피싱, 스미싱, 딥페이크 등 최신 금융사기 뉴스를 수집·분석 중입니다."):
     news_list, all_news_list, alert_crime_hits, fetch_errors, alert_keywords = (
-        fetch_phishing_news(client_id, client_secret, _cache_ver=44)
+        fetch_phishing_news(client_id, client_secret, _cache_ver=45)
     )
 
 if fetch_errors and not news_list:
