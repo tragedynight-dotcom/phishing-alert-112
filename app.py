@@ -14,8 +14,8 @@ import streamlit.components.v1 as components
 # 1. 페이지 설정
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="대국민 피싱 범죄 예방 주의보",
-    page_icon="🚨",
+    page_title="👮 피싱 범죄 Da Moa",
+    page_icon="👮",
     layout="centered",
 )
 
