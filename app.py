@@ -14,10 +14,71 @@ import streamlit.components.v1 as components
 # 1. 페이지 설정
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="👮 피싱 범죄 Da Moa",
-    page_icon="👮",
+    page_title="🚨 피싱 범죄 Da Moa",
+    page_icon="🚨",
     layout="centered",
 )
+
+
+def inject_pwa_head() -> None:
+    """홈 화면 추가 시 'Streamlit' 대신 앱 이름·👮 아이콘이 보이도록 부모 문서 head 수정."""
+    components.html(
+        """
+        <script>
+        (function () {
+          const doc = window.parent.document;
+          const APP_NAME = "피싱 범죄 Da Moa";
+          const SHORT_NAME = "Da Moa";
+          const ICON = "/app/static/icon.svg";
+          const MANIFEST = "/app/static/manifest.json";
+
+          doc.title = APP_NAME;
+
+          function upsertMeta(name, content, attr) {
+            attr = attr || "name";
+            let el = doc.querySelector("meta[" + attr + '="' + name + '"]');
+            if (!el) {
+              el = doc.createElement("meta");
+              el.setAttribute(attr, name);
+              doc.head.appendChild(el);
+            }
+            el.setAttribute("content", content);
+          }
+
+          upsertMeta("application-name", SHORT_NAME);
+          upsertMeta("apple-mobile-web-app-title", SHORT_NAME);
+          upsertMeta("apple-mobile-web-app-capable", "yes");
+          upsertMeta("mobile-web-app-capable", "yes");
+          upsertMeta("theme-color", "#b91c1c");
+
+          if (!doc.querySelector('link[rel="manifest"]')) {
+            const manifestLink = doc.createElement("link");
+            manifestLink.rel = "manifest";
+            manifestLink.href = MANIFEST;
+            doc.head.appendChild(manifestLink);
+          }
+
+          if (!doc.querySelector('link[rel="apple-touch-icon"]')) {
+            const touch = doc.createElement("link");
+            touch.rel = "apple-touch-icon";
+            touch.href = ICON;
+            doc.head.appendChild(touch);
+          }
+
+          if (!doc.querySelector('link[rel="icon"]')) {
+            const fav = doc.createElement("link");
+            fav.rel = "icon";
+            fav.href = ICON;
+            doc.head.appendChild(fav);
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+inject_pwa_head()
 
 if "display_count" not in st.session_state:
     st.session_state.display_count = 3
