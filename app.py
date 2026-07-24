@@ -2095,7 +2095,7 @@ def render_alert_moa_keyword_link(alert_keyword: str) -> None:
     ):
         trigger_moa_from_alert(alert_keyword)
         st.rerun()
-    st.caption("👆 클릭하면 아래 Da Moa에서 관련 기사를 불러옵니다.")
+    st.caption("👆 클릭하면 아래 최신 피싱 기사 Da Moa에서 관련 기사를 불러옵니다.")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -2892,8 +2892,10 @@ if picked != st.session_state.get("moa_last_picked"):
     st.session_state.pop("moa_alert_display_kw", None)
     if picked:
         st.session_state.moa_active_keyword = picked
+    else:
+        st.session_state.pop("moa_active_keyword", None)
 
-selected_kw = st.session_state.get("moa_active_keyword") or picked
+selected_kw = picked or st.session_state.get("moa_active_keyword")
 moa_articles: list[dict] = []
 moa_error: str | None = None
 moa_crime_only = False
