@@ -2378,21 +2378,25 @@ def resolve_moa_search_keyword(alert_keyword: str) -> str:
 
 
 def trigger_moa_from_alert(alert_keyword: str) -> None:
-    """주의보 키워드 클릭 시 Da Moa 검색·스크롤."""
-    search_kw = resolve_moa_search_keyword(alert_keyword)
-    st.session_state.moa_active_keyword = search_kw
-    st.session_state.moa_search_source = "picker"
+    """주의보 키워드 클릭 → 집계에 쓰인 기사 목록으로 스크롤."""
+    st.session_state.moa_active_keyword = alert_keyword
+    st.session_state.moa_search_source = "alert"
     st.session_state.moa_alert_display_kw = alert_keyword
-    if search_kw in MOA_KEYWORDS:
-        st.session_state.moa_keyword_picker = search_kw
-    st.session_state.moa_last_picked = search_kw
+    if alert_keyword in MOA_KEYWORDS:
+        st.session_state.moa_keyword_picker = alert_keyword
+        st.session_state.moa_last_picked = alert_keyword
+    else:
+        # 목록에 없는 키워드면 selectbox를 비워 두고, picker 변경 감지가
+        # 주의보 모드를 지우지 않도록 last_picked도 None으로 맞춤
+        st.session_state.moa_keyword_picker = None
+        st.session_state.moa_last_picked = None
     st.session_state.moa_display_count = 5
     st.session_state.moa_from_alert_nav = True
     st.session_state.scroll_to_moa = True
 
 
 def render_alert_moa_keyword_link(alert_keywords: str | list[str]) -> None:
-    """예방 포인트 아래 — 주의보 키워드 클릭 → Da Moa 기사."""
+    """예방 포인트 아래 — 주의보 키워드 클릭 → 집계 기사 목록."""
     keywords = (
         [alert_keywords] if isinstance(alert_keywords, str) else list(alert_keywords)
     )
@@ -2407,13 +2411,13 @@ def render_alert_moa_keyword_link(alert_keywords: str | list[str]) -> None:
             if st.button(
                 f"📰 {keyword}",
                 key=f"alert_goto_moa_btn_{idx}_{keyword}",
-                help="클릭하면 아래 최신 피싱 기사 Da Moa를 불러옵니다.",
+                help="클릭하면 주의보 횟수에 포함된 기사 목록으로 이동합니다.",
                 use_container_width=True,
                 type="secondary",
             ):
                 trigger_moa_from_alert(keyword)
                 st.rerun()
-    st.caption("👆 클릭하면 아래 최신 피싱 기사 Da Moa에서 관련 기사를 불러옵니다.")
+    st.caption("👆 클릭하면 아래 Da Moa에서 주의보 집계에 포함된 기사를 보여줍니다.")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -2757,6 +2761,64 @@ def scrape_keyword_frequency(
     return rank_derived_keywords(counter, top_n)
 
 
+def article_counts_toward_alert_keyword(news: dict, keyword: str) -> bool:
+    """주의보 scrape_keyword_frequency와 동일 규칙으로 해당 키워드가 집계되는지."""
+    target = (keyword or "").strip()
+    if not target:
+        return False
+
+    excluded = {k.lower() for k in NON_CRIME_EXCLUDE_KEYWORDS}
+    excluded.update(k.lower() for k in INVESTIGATION_META_EXCLUDE_KEYWORDS)
+    allowlist = {
+        k.lower(): k
+        for k in DERIVED_KEYWORD_ALLOWLIST
+        if k.lower() not in excluded and k.lower() not in _GENERIC_DERIVED_EXCLUDED_LOWER
+    }
+    phrases = sorted(allowlist.values(), key=len, reverse=True)
+
+    text = f"{news.get('title', '')} {news.get('description', '')}"
+    work = strip_investigation_terms(text)
+    for bad in ("보이스피싱", "보이스 피싱", "보이스"):
+        work = work.replace(bad, " ")
+    work = re.sub(r"(?<![가-힣])피싱(?![가-힣])", " ", work)
+    work = re.sub(r"(?<![가-힣])금융사기(?![가-힣])", " ", work)
+
+    target_lower = target.lower()
+    for phrase in phrases:
+        key = phrase.lower()
+        if phrase.isascii():
+            hits = len(re.findall(re.escape(phrase), work, flags=re.IGNORECASE))
+        else:
+            hits = work.count(phrase)
+        if not hits:
+            continue
+        matched = allowlist.get(key, phrase)
+        if matched == target or matched.lower() == target_lower:
+            return True
+        # 더 긴 구문이 먼저 먹으면 해당 구간 제거 후 계속 (집계와 동일)
+        if phrase.isascii():
+            work = re.sub(re.escape(phrase), " ", work, flags=re.IGNORECASE)
+        else:
+            work = work.replace(phrase, " ")
+    return False
+
+
+def filter_articles_by_alert_keyword(
+    articles: list[dict], keyword: str
+) -> list[dict]:
+    """주의보 N회 집계에 실제로 포함된 기사만 반환."""
+    kw = (keyword or "").strip()
+    if not kw:
+        return []
+    matched = [
+        article
+        for article in articles
+        if article_counts_toward_alert_keyword(article, kw)
+    ]
+    matched.sort(key=lambda x: x.get("datetime") or datetime.min, reverse=True)
+    return dedupe_articles_by_title(matched)
+
+
 def _modus_cue_in_text(text: str, cue: str) -> bool:
     if not cue:
         return False
@@ -2940,7 +3002,7 @@ def fetch_moa_keyword_news(
 
 
 @st.cache_data(ttl=NAVER_API_CACHE_TTL, show_spinner=False)
-def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 56):
+def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 57):
     """
     1) 피싱·보이스피싱·금융사기 등 관련 키워드로 뉴스 전체 수집
     2) 수집 기사 중 범죄 행위·수단이 드러나는 기사만 추려 재검색 키워드 분석
@@ -3056,14 +3118,17 @@ def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 56
     top_keywords = filter_keywords_for_research(keyword_rank)
 
     # 피싱 주의보: 실제사례·범죄행위 필터 없이, 홍보·표창 등만 제외
-    alert_articles = [
-        a
-        for a in all_phishing_articles
-        if a["datetime"] >= past_alert
-        and not is_alert_promo_excluded_article(
-            a["title"], a.get("description", ""), a.get("link", "")
-        )
-    ]
+    # 링크는 달라도 제목이 같으면 같은 기사로 보고, 횟수·목록 건수를 맞춘다
+    alert_articles = dedupe_articles_by_title(
+        [
+            a
+            for a in all_phishing_articles
+            if a["datetime"] >= past_alert
+            and not is_alert_promo_excluded_article(
+                a["title"], a.get("description", ""), a.get("link", "")
+            )
+        ]
+    )
     alert_keyword_rank = scrape_keyword_frequency(
         alert_articles,
         top_n=10,
@@ -3184,7 +3249,7 @@ with st.spinner(
         fetch_errors,
         alert_keywords,
         alert_news,
-    ) = fetch_phishing_news(client_id, client_secret, _cache_ver=56)
+    ) = fetch_phishing_news(client_id, client_secret, _cache_ver=57)
 
 if fetch_errors and not news_list:
     st.error("뉴스 데이터를 가져오지 못했습니다.\n\n- " + "\n- ".join(fetch_errors))
@@ -3349,20 +3414,27 @@ if moa_custom_clicked:
         st.rerun()
 
 if picked != st.session_state.get("moa_last_picked"):
-    st.session_state.moa_last_picked = picked
-    st.session_state.moa_display_count = 5
-    st.session_state.pop("moa_from_alert_nav", None)
-    st.session_state.pop("moa_alert_display_kw", None)
-    if picked:
-        st.session_state.moa_active_keyword = picked
-        st.session_state.moa_search_source = "picker"
-    elif st.session_state.get("moa_search_source") != "custom":
-        st.session_state.pop("moa_active_keyword", None)
+    # 주의보 모드에서 목록 밖 키워드(picker=None)는 유지
+    if not (
+        st.session_state.get("moa_search_source") == "alert"
+        and picked is None
+        and st.session_state.get("moa_active_keyword")
+    ):
+        st.session_state.moa_last_picked = picked
+        st.session_state.moa_display_count = 5
+        st.session_state.pop("moa_from_alert_nav", None)
+        st.session_state.pop("moa_alert_display_kw", None)
+        if picked:
+            st.session_state.moa_active_keyword = picked
+            st.session_state.moa_search_source = "picker"
+        elif st.session_state.get("moa_search_source") not in ("custom", "alert"):
+            st.session_state.pop("moa_active_keyword", None)
 
 selected_kw = st.session_state.get("moa_active_keyword") or picked
 moa_articles: list[dict] = []
 moa_error: str | None = None
 moa_crime_only = False
+moa_from_alert = st.session_state.get("moa_search_source") == "alert"
 
 if selected_kw:
     moa_crime_only = st.checkbox(
@@ -3375,10 +3447,14 @@ if selected_kw:
             "② 편취·수법·기승 등 + 일당·속아·억원 등 사건 신호가 함께 있는 기사만 표시합니다."
         ),
     )
-    with st.spinner(f"「{selected_kw}」 관련 기사 불러오는 중…"):
-        moa_articles, moa_error = fetch_moa_keyword_news(
-            client_id, client_secret, selected_kw
-        )
+    if moa_from_alert:
+        # 주의보 N회 집계에 쓰인 기사만 (API 재검색 없음)
+        moa_articles = filter_articles_by_alert_keyword(alert_news, selected_kw)
+    else:
+        with st.spinner(f"「{selected_kw}」 관련 기사 불러오는 중…"):
+            moa_articles, moa_error = fetch_moa_keyword_news(
+                client_id, client_secret, selected_kw
+            )
 
 if moa_crime_only and moa_articles:
     moa_articles = [
@@ -3396,13 +3472,17 @@ if selected_kw:
         st.error(moa_error)
     elif moa_articles:
         filter_note = " · 범죄기사" if moa_crime_only else ""
-        if st.session_state.get("moa_from_alert_nav"):
+        if moa_from_alert:
             display_kw = st.session_state.get("moa_alert_display_kw") or selected_kw
             st.markdown(
-                f'<p class="phishing-moa-card-label">🚨 주의보 키워드 「{html.escape(display_kw)}」 '
-                f"관련 최신 기사 {len(moa_articles)}건{filter_note}</p>",
+                f'<p class="phishing-moa-card-label">🚨 주의보 「{html.escape(display_kw)}」 '
+                f"집계 기사 {len(moa_articles)}건{filter_note}</p>",
                 unsafe_allow_html=True,
             )
+            if not moa_crime_only:
+                st.caption(
+                    f"주의보 「{display_kw}」 {len(moa_articles)}회 언급과 같은 기사입니다."
+                )
             st.session_state.pop("moa_from_alert_nav", None)
         else:
             st.markdown(
