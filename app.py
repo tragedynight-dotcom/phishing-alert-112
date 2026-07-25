@@ -91,7 +91,7 @@ if "moa_last_picked" not in st.session_state:
 
 # 피싱 주의보 키워드 집계 기간 (일)
 ALERT_LOOKBACK_DAYS = 14
-# 네이버 검색 API 결과 캐시 (초) — 새로고침·버튼 클릭마다 API를 다시 부르지 않도록
+# 네이버 검색 API 결과 캐시 (초) — 30분
 NAVER_API_CACHE_TTL = 1800
 # NAVER API Hub (콘솔: console.ncloud.com/naver-api-hub) — 구 openapi.naver.com 과 URL·헤더가 다름
 NAVER_NEWS_SEARCH_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
@@ -527,7 +527,6 @@ PHISHING_KEYWORDS = [
     "금융기관 사칭",
     "기관사칭",
     "지인사칭",
-    "전세사기",
     "딥페이크",
     "스미싱",
     "큐싱",
@@ -914,27 +913,55 @@ def summarize_crime_from_news(top_crime: str, news_list: list[dict]) -> str:
     return f"보도에서는 **{' / '.join(top_tactics)}** 방식이 함께 언급됩니다."
 
 
+def select_tied_top_keywords(
+    keyword_rank: list[tuple[str, int]],
+) -> list[tuple[str, int]]:
+    """1위와 언급 횟수가 같은 키워드를 모두 반환합니다."""
+    if not keyword_rank:
+        return []
+    top_count = keyword_rank[0][1]
+    return [(kw, cnt) for kw, cnt in keyword_rank if cnt == top_count]
+
+
 def build_urgent_alert_info(
-    top_crime: str, top_count: int, news_list: list[dict]
+    top_crimes: list[str] | str,
+    top_count: int,
+    news_list: list[dict],
 ) -> dict:
     """긴급 주의보에 쓸 키워드·범행 진행 방식 문구를 만듭니다."""
-    profile = ALERT_PROFILES.get(
-        top_crime,
-        {
-            "how": "피싱·사기 피해를 유도하는 연락·링크·송금 요구가 최근 2주 보도에서 반복되고 있습니다.",
-            "watch": "금전·개인정보 요구, 링크 클릭·앱 설치 유도가 있으면 일단 중단하고 공식 경로로 확인하세요.",
-        },
-    )
-    how_base = profile.get("how", "")
-    news_hint = summarize_crime_from_news(top_crime, news_list)
-    how_full = f"{how_base} {news_hint}".strip() if news_hint else how_base
+    keywords = [top_crimes] if isinstance(top_crimes, str) else list(top_crimes)
+    if not keywords:
+        keywords = ["피싱"]
+
+    how_parts: list[str] = []
+    watch_parts: list[str] = []
+    for crime in keywords:
+        profile = ALERT_PROFILES.get(
+            crime,
+            {
+                "how": "피싱·사기 피해를 유도하는 연락·링크·송금 요구가 최근 보도에서 반복되고 있습니다.",
+                "watch": "금전·개인정보 요구, 링크 클릭·앱 설치 유도가 있으면 일단 중단하고 공식 경로로 확인하세요.",
+            },
+        )
+        how_base = profile.get("how", "")
+        news_hint = summarize_crime_from_news(crime, news_list)
+        how_full = f"{how_base} {news_hint}".strip() if news_hint else how_base
+        if len(keywords) > 1:
+            how_parts.append(f"[{crime}] {how_full}")
+            if profile.get("watch"):
+                watch_parts.append(f"[{crime}] {profile['watch']}")
+        else:
+            how_parts.append(how_full)
+            if profile.get("watch"):
+                watch_parts.append(profile["watch"])
 
     return {
-        "keyword": top_crime,
+        "keyword": " · ".join(keywords),
+        "keywords": keywords,
         "count": top_count,
-        "how": how_base,
-        "how_full": how_full,
-        "watch": profile.get("watch", ""),
+        "how": how_parts[0] if how_parts else "",
+        "how_full": "\n".join(how_parts),
+        "watch": "\n".join(watch_parts),
     }
 
 
@@ -952,20 +979,19 @@ def render_app_analysis_block(analysis: dict) -> None:
     """API 검색결과와 구분된 자체 범행 수법 분석 블록."""
     st.markdown('<div class="phishing-app-analysis-block"></div>', unsafe_allow_html=True)
     st.markdown(f"**🔎 범행 수법 분석:** {analysis['how_detail']}")
-    if analysis["tactics"]:
-        st.caption("감지된 구체 수단: " + " · ".join(analysis["tactics"]))
     st.info(f"🛡️ 예방: {analysis['watch']}")
 
 
 def render_phishing_alert_block(alert: dict) -> None:
     """피싱 주의보 — 강조형 카드 UI."""
-    keyword = html.escape(alert["keyword"])
+    keywords = alert.get("keywords") or [alert["keyword"]]
+    keyword_html = html.escape(" · ".join(keywords))
     count = alert["count"]
 
     how_html = html.escape(alert["how_full"]).replace("\n", "<br>")
     watch_html = ""
     if alert.get("watch"):
-        watch = html.escape(alert["watch"])
+        watch = html.escape(alert["watch"]).replace("\n", "<br>")
         watch_html = (
             f'<div class="phishing-alert-watch"><strong>🛡️ 예방 포인트</strong><br>{watch}</div>'
         )
@@ -984,10 +1010,10 @@ def render_phishing_alert_block(alert: dict) -> None:
           </div>
           <div class="phishing-alert-label">최근 피싱범죄 주의 키워드</div>
           <div class="phishing-alert-kw-main">
-            <div class="phishing-alert-keyword">{keyword}</div>
+            <div class="phishing-alert-keyword">{keyword_html}</div>
           </div>
           <div class="phishing-alert-count-wrap">
-            <p class="phishing-alert-count">최근 2주 · {count}회 언급</p>
+            <p class="phishing-alert-count">{count}회 언급</p>
           </div>
         </div>
         {how_section}
@@ -1043,21 +1069,122 @@ def render_moa_section_header() -> None:
     )
 
 
-# 기사 본문에서 구체적 범행 수단을 찾는 단서
-MODUS_CUES = [
-    ("금융기관 사칭", ["금융기관", "금감원", "금융감독", "은행 직원", "카드사", "명의도용"]),
-    ("검찰·경찰 등 수사기관 사칭", ["검찰", "경찰", "수사관", "체포영장", "공조"]),
-    ("가족·지인 사칭 급전 요구", ["가족", "지인", "아들", "딸", "급전", "폰 고장"]),
-    ("악성 문자·링크 클릭 유도", ["문자", "링크", "URL", "악성앱", "설치 유도"]),
-    ("QR코드 스캔 유도", ["QR", "큐싱", "스캔"]),
-    ("메신저(카톡 등)로 금전·상품권 요구", ["카카오톡", "카톡", "메신저", "상품권", "쿠폰"]),
-    ("원격제어 앱 설치 요구", ["원격", "팀뷰어", "AnyDesk", "앱 설치", "화면공유"]),
-    ("고수익 투자·리딩방 유인", ["투자", "리딩", "수익률", "가상자산", "코인", "주식 리딩"]),
-    ("영상·딥페이크 협박·사칭", ["딥페이크", "영상 유포", "몸캠", "합성"]),
-    ("지원금·환급 미끼", ["지원금", "환급", "보조금", "재난지원", "신청 링크"]),
-    ("전세·임대차 계약 관련 편취", ["전세", "보증금", "임대차", "등기"]),
-    ("렌탈·렌터카·카셰어링 명의 대여 후 미반납·추가금 요구", ["렌탈", "렌터카", "카셰어링", "차량 공유", "명의 대여", "보증금", "연장 요금", "범칙금"]),
-    ("신종·변형 수법 언급", ["신종 사기", "신종", "신종수법", "변형 수법"]),
+# 기사 본문에서 구체적 범행 수단을 찾는 규칙
+# - strong: 단독으로도 인정 (고유·강한 단서)
+# - combos: (그룹A 중 1개) + (그룹B 중 1개) 동시 등장 시 인정
+# - types: 호환되는 피싱 유형 (비어 있으면 모든 유형)
+MODUS_RULES: list[dict] = [
+    {
+        "label": "금융기관 사칭",
+        "strong": ("금감원", "금융감독원", "은행 직원", "카드사 직원"),
+        "combos": (
+            (("금융기관", "은행", "카드사", "금감원", "금융감독"), ("사칭", "사칭해", "행세", "직원인 척")),
+        ),
+        "types": {
+            "보이스피싱",
+            "금융기관 사칭",
+            "기관사칭",
+            "스미싱",
+            "메신저피싱",
+            "전화금융사기",
+        },
+    },
+    {
+        "label": "검찰·경찰 등 수사기관 사칭",
+        "strong": ("체포영장", "검찰 사칭", "경찰 사칭"),
+        "combos": (
+            (("검찰", "경찰", "수사관", "경찰청"), ("사칭", "사칭해", "행세", "공조", "수사")),
+        ),
+        "types": {
+            "보이스피싱",
+            "기관사칭",
+            "메신저피싱",
+            "스미싱",
+            "전화금융사기",
+        },
+    },
+    {
+        "label": "가족·지인 사칭 급전 요구",
+        "strong": ("폰 고장", "휴대폰이 고장"),
+        "combos": (
+            (("가족", "지인", "아들", "딸", "엄마", "아빠"), ("급전", "돈", "송금", "이체", "빌려")),
+        ),
+        "types": {"메신저피싱", "지인사칭", "보이스피싱"},
+    },
+    {
+        "label": "악성 문자·링크 클릭 유도",
+        "strong": ("악성앱", "악성 링크", "악성링크", "설치 유도"),
+        "combos": (
+            (("문자", "메시지", "SMS"), ("링크", "URL", "클릭", "접속")),
+            (("링크", "URL"), ("개인정보", "로그인", "결제", "인증")),
+        ),
+        "types": {"스미싱", "큐싱", "보이스피싱", "정부지원금 사기", "메신저피싱"},
+    },
+    {
+        "label": "QR코드 스캔 유도",
+        "strong": ("큐싱",),
+        "combos": ((("QR", "큐알", "큐아르"), ("스캔", "촬영", "인식", "결제")),),
+        "types": {"큐싱", "스미싱"},
+    },
+    {
+        "label": "메신저(카톡 등)로 금전·상품권 요구",
+        "strong": ("상품권", "문화상품권", "구글기프트"),
+        "combos": (
+            (("카카오톡", "카톡", "메신저", "텔레그램"), ("송금", "이체", "돈", "급전", "상품권", "쿠폰")),
+        ),
+        "types": {"메신저피싱", "몸캠피싱", "로맨스스캠", "지인사칭"},
+    },
+    {
+        "label": "원격제어 앱 설치 요구",
+        "strong": ("팀뷰어", "AnyDesk", "TeamViewer", "원격제어"),
+        "combos": (
+            (("원격", "원격제어"), ("설치", "앱", "화면공유", "화면 공유", "어플")),
+        ),
+        "types": {
+            "보이스피싱",
+            "기관사칭",
+            "금융기관 사칭",
+            "전화금융사기",
+        },
+    },
+    {
+        "label": "고수익 투자·리딩방 유인",
+        "strong": ("리딩방", "주식 리딩", "원금 보장"),
+        "combos": (
+            (("투자", "리딩", "코인", "가상자산"), ("수익", "수익률", "고수익", "보장", "단타")),
+        ),
+        "types": {"로맨스스캠", "리딩방", "고수익 투자", "신종 사기"},
+    },
+    {
+        "label": "영상·딥페이크 협박·사칭",
+        "strong": ("딥페이크", "몸캠", "영상 유포"),
+        "combos": (
+            (("영상", "딥페이크", "합성"), ("협박", "유포", "유출", "사칭")),
+        ),
+        "types": {"딥페이크", "몸캠피싱"},
+    },
+    {
+        "label": "지원금·환급 미끼",
+        "strong": ("재난지원금", "지원금 신청"),
+        "combos": (
+            (("지원금", "환급", "보조금", "재난지원"), ("링크", "신청", "클릭", "문자", "수수료")),
+        ),
+        "types": {"정부지원금 사기", "스미싱", "보이스피싱"},
+    },
+    {
+        "label": "렌탈·렌터카·카셰어링 명의 대여 후 미반납·추가금 요구",
+        "strong": ("카셰어링", "명의 대여"),
+        "combos": (
+            (("렌탈", "렌터카", "카셰어링", "차량 공유"), ("보증금", "범칙금", "미반납", "추가금", "연장")),
+        ),
+        "types": {"신종 사기", "카셰어링 사기", "휴대폰 렌탈 사기"},
+    },
+    {
+        "label": "신종·변형 수법 언급",
+        "strong": ("신종수법", "신종 사기", "변형 수법"),
+        "combos": (),
+        "types": set(),
+    },
 ]
 
 
@@ -1222,6 +1349,30 @@ def is_police_station_promo_article(title: str, description: str = "") -> bool:
     if has_crime_case_narrative(title):
         return False
     return True
+
+
+def is_alert_promo_excluded_article(
+    title: str, description: str = "", link: str = ""
+) -> bool:
+    """피싱 주의보용 — 홍보·표창·협약·예방교육·예능·기고만 제외 (실제사례 필터 없음)."""
+    combined = f"{title} {description}"
+    if contains_excluded(combined):
+        return True
+    if has_promo_activity_context(combined):
+        return True
+    if any(marker in combined for marker in PROMO_POLICY_MARKERS):
+        return True
+    if is_promo_title_article(title, description):
+        return True
+    if is_police_station_promo_article(title, description):
+        return True
+    if is_prevention_advice_article(title, description):
+        return True
+    if is_entertainment_article(combined):
+        return True
+    if is_editorial_or_opinion_article(title, description, link):
+        return True
+    return False
 
 
 # 실제 피해·범행 사례 신호
@@ -1725,7 +1876,6 @@ def is_method_focused_article(
             "큐싱",
             "로맨스스캠",
             "신종 사기",
-            "전세사기",
             "금융기관 사칭",
             "휴대폰 렌탈 사기",
             "카셰어링 사기",
@@ -1749,16 +1899,42 @@ def is_method_focused_article(
     return True
 
 
-MOA_CRIME_TITLE_MARKERS = (
-    "수법",
+# Da Moa 범죄기사 — 제목 기준 (예방·주의 당부성 기사 축소)
+MOA_CRIME_INVESTIGATION_MARKERS = (
     "검거",
-    "기승",
-    "편취",
-    "급증",
-    "적발",
+    "검거된",
+    "검거돼",
+    "붙잡",
     "송치",
     "구속",
     "체포",
+    "적발",
+    "기소",
+    "재판",
+    "선고",
+    "징역",
+    "피의자",
+    "용의자",
+    "일당",
+)
+MOA_CRIME_METHOD_MARKERS = (
+    "편취",
+    "편취한",
+    "수법",
+    "기승",
+    "급증",
+)
+MOA_CRIME_CASE_SIGNALS = (
+    "일당",
+    "피의자",
+    "용의자",
+    "속아",
+    "속았",
+    "억원",
+    "수억",
+    "만원",
+    "피해액",
+    "조직",
 )
 
 
@@ -1778,8 +1954,56 @@ def is_moa_keyword_related(title: str, description: str, keyword: str) -> bool:
 def is_moa_crime_only_article(
     title: str, description: str = "", keywords: list[str] | None = None
 ) -> bool:
-    """Da Moa — 범죄기사: 제목에 수법·검거·기승·편취 등이 있으면 표시 (피해 제외)."""
-    return any(marker in title.strip() for marker in MOA_CRIME_TITLE_MARKERS)
+    """Da Moa — 범죄기사(제목).
+
+    1) 수사·사법 마커 1개 이상, 또는
+    2) 범행 마커 + 사건 신호 동시
+    """
+    t = title.strip()
+    if not t:
+        return False
+    if any(marker in t for marker in MOA_CRIME_INVESTIGATION_MARKERS):
+        return True
+    has_method = any(marker in t for marker in MOA_CRIME_METHOD_MARKERS)
+    has_case = any(signal in t for signal in MOA_CRIME_CASE_SIGNALS)
+    return has_method and has_case
+
+
+def normalize_article_title(title: str) -> str:
+    """중복 판별용 제목 정규화 (공백·구두점·말미 태그 차이 무시)."""
+    t = (title or "").strip().lower()
+    t = re.sub(r"<.*?>", "", t)
+    for a, b in (
+        ("“", '"'),
+        ("”", '"'),
+        ("‘", "'"),
+        ("’", "'"),
+        ("…", "..."),
+        ("·", ""),
+        ("・", ""),
+        ("－", "-"),
+        ("—", "-"),
+        ("–", "-"),
+    ):
+        t = t.replace(a, b)
+    # 말미 부가 표기 제거: (종합), [포토], 【속보】 등
+    t = re.sub(r"[\(（\[【][^\)）\]】]{0,20}[\)）\]】]\s*$", "", t)
+    t = re.sub(r"\s+", "", t)
+    t = re.sub(r"[\"'.,，。!！?？~\-_/\\|\[\]()（）【】「」『』…]", "", t)
+    return t
+
+
+def dedupe_articles_by_title(articles: list[dict]) -> list[dict]:
+    """동일·유사 제목 기사는 목록에 한 번만 남깁니다."""
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for article in articles:
+        key = normalize_article_title(article.get("title", ""))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(article)
+    return unique
 
 
 def relevance_score(
@@ -1994,7 +2218,6 @@ HIGH_PRIORITY_ACTION_KEYWORDS = {
     "금융기관 사칭",
     "기관사칭",
     "지인사칭",
-    "전세사기",
     "딥페이크",
     "스미싱",
     "큐싱",
@@ -2040,6 +2263,7 @@ GENERIC_DERIVED_KEYWORD_EXCLUDE = {
 }
 
 # 피싱 검색 결과에서 파생 키워드 Top10 — 실제 범죄 행위·수단만 허용
+# (보이스피싱은 너무 포괄적이라 제외 → 구체 수법·행위 키워드 위주)
 DERIVED_KEYWORD_ALLOWLIST = {
     *(kw for kw in PHISHING_KEYWORDS if kw not in {"보이스피싱"}),
     "대포통장",
@@ -2087,14 +2311,18 @@ PHISHING_SEED_QUERIES = (
     "지인사칭",
     "리딩방",
     "고수익 투자",
-    "전세사기",
     "로맨스스캠",
     "딥페이크",
     "정부지원금 사기",
     "신종 사기",
     "전화금융사기",
 )
-MOA_KEYWORDS = tuple(k for k in PHISHING_SEED_QUERIES if k != "피싱")
+# Da Moa 선택용 — 전세사기는 자동 수집·주의보에서는 제외하되 키워드 검색은 유지
+MOA_KEYWORDS = tuple(
+    dict.fromkeys(
+        [k for k in PHISHING_SEED_QUERIES if k != "피싱"] + ["전세사기"]
+    )
+)
 
 _ALERT_KEYWORD_TO_MOA = {
     "편취": "보이스피싱",
@@ -2126,7 +2354,6 @@ _ALERT_KEYWORD_TO_MOA = {
     "고수익 투자·리딩방 유인": "리딩방",
     "영상·딥페이크 협박·사칭": "딥페이크",
     "지원금·환급 미끼": "정부지원금 사기",
-    "전세·임대차 계약 관련 편취": "전세사기",
     "렌탈·렌터카·카셰어링 명의 대여 후 미반납·추가금 요구": "신종 사기",
     "신종·변형 수법 언급": "신종 사기",
 }
@@ -2154,6 +2381,7 @@ def trigger_moa_from_alert(alert_keyword: str) -> None:
     """주의보 키워드 클릭 시 Da Moa 검색·스크롤."""
     search_kw = resolve_moa_search_keyword(alert_keyword)
     st.session_state.moa_active_keyword = search_kw
+    st.session_state.moa_search_source = "picker"
     st.session_state.moa_alert_display_kw = alert_keyword
     if search_kw in MOA_KEYWORDS:
         st.session_state.moa_keyword_picker = search_kw
@@ -2163,18 +2391,28 @@ def trigger_moa_from_alert(alert_keyword: str) -> None:
     st.session_state.scroll_to_moa = True
 
 
-def render_alert_moa_keyword_link(alert_keyword: str) -> None:
+def render_alert_moa_keyword_link(alert_keywords: str | list[str]) -> None:
     """예방 포인트 아래 — 주의보 키워드 클릭 → Da Moa 기사."""
+    keywords = (
+        [alert_keywords] if isinstance(alert_keywords, str) else list(alert_keywords)
+    )
+    keywords = [kw for kw in keywords if kw]
+    if not keywords:
+        return
+
     st.markdown('<div class="phishing-alert-moa-nav">', unsafe_allow_html=True)
-    if st.button(
-        f"📰 {alert_keyword}",
-        key="alert_goto_moa_btn",
-        help="클릭하면 아래 최신 피싱 기사 Da Moa를 불러옵니다.",
-        use_container_width=True,
-        type="secondary",
-    ):
-        trigger_moa_from_alert(alert_keyword)
-        st.rerun()
+    cols = st.columns(len(keywords)) if len(keywords) > 1 else [st.container()]
+    for idx, (col, keyword) in enumerate(zip(cols, keywords)):
+        with col:
+            if st.button(
+                f"📰 {keyword}",
+                key=f"alert_goto_moa_btn_{idx}_{keyword}",
+                help="클릭하면 아래 최신 피싱 기사 Da Moa를 불러옵니다.",
+                use_container_width=True,
+                type="secondary",
+            ):
+                trigger_moa_from_alert(keyword)
+                st.rerun()
     st.caption("👆 클릭하면 아래 최신 피싱 기사 Da Moa에서 관련 기사를 불러옵니다.")
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -2275,7 +2513,7 @@ GENERIC_SEED_EXCLUDE = {
 }
 PRIMARY_RESEARCH_SEEDS = ("피싱", "보이스피싱", "금융사기")
 # 3단계 재검색 — 키워드 수·쿼리 수 (API 호출 절감)
-RESEARCH_KEYWORD_TOP_N = 5
+RESEARCH_KEYWORD_TOP_N = 10
 # 1단계 시드 검색 — 네이버 display 최대 100
 SEED_QUERY_DISPLAY = 100
 INVESTIGATION_ONLY_MARKERS = (
@@ -2480,7 +2718,7 @@ def scrape_keyword_frequency(
         text = f"{news.get('title', '')} {news.get('description', '')}"
         work = strip_investigation_terms(text)
 
-        # 시드·일반 표현 제거 (복합 수법명은 allowlist에서 긴 구문 우선 매칭)
+        # 시드·포괄 표현 제거 (복합 수법명은 allowlist에서 긴 구문 우선 매칭)
         for bad in ("보이스피싱", "보이스 피싱", "보이스"):
             work = work.replace(bad, " ")
         work = re.sub(r"(?<![가-힣])피싱(?![가-힣])", " ", work)
@@ -2495,8 +2733,8 @@ def scrape_keyword_frequency(
             else:
                 hits = work.count(phrase)
             if hits:
-                # 표시용 대표 표기는 allowlist 원문
-                counter[allowlist.get(key, phrase)] += hits
+                # 기사 1건당 키워드 1회만 집계 (동일 기사 내 중복 언급은 무시)
+                counter[allowlist.get(key, phrase)] += 1
                 if phrase.isascii():
                     work = re.sub(re.escape(phrase), " ", work, flags=re.IGNORECASE)
                 else:
@@ -2519,12 +2757,62 @@ def scrape_keyword_frequency(
     return rank_derived_keywords(counter, top_n)
 
 
-def detect_modus_operandi(text: str) -> list[str]:
-    hits = []
-    for label, cues in MODUS_CUES:
-        if any(cue.lower() in text.lower() if cue.isascii() else cue in text for cue in cues):
-            hits.append(label)
+def _modus_cue_in_text(text: str, cue: str) -> bool:
+    if not cue:
+        return False
+    if cue.isascii():
+        return cue.lower() in text.lower()
+    return cue in text
+
+
+def _modus_group_hit(text: str, group: tuple[str, ...] | list[str]) -> bool:
+    return any(_modus_cue_in_text(text, cue) for cue in group)
+
+
+def _modus_rule_matches(text: str, rule: dict) -> tuple[bool, int]:
+    """규칙 매칭 여부와 강도(2=강함, 1=약함)를 반환합니다."""
+    strength = 0
+    for cue in rule.get("strong") or ():
+        if _modus_cue_in_text(text, cue):
+            strength = 2
+            break
+    for combo in rule.get("combos") or ():
+        if len(combo) < 2:
+            continue
+        group_a, group_b = combo[0], combo[1]
+        if _modus_group_hit(text, group_a) and _modus_group_hit(text, group_b):
+            strength = max(strength, 2)
+    return strength > 0, strength
+
+
+def _modus_type_compatible(primary: str | None, rule: dict) -> bool:
+    allowed = rule.get("types") or set()
+    if not allowed:
+        return True
+    if not primary or primary in ("피싱(유형 미상)", "피싱"):
+        return True
+    return primary in allowed
+
+
+def detect_modus_operandi_detailed(
+    text: str, primary: str | None = None
+) -> list[tuple[str, int]]:
+    """(수법 라벨, 강도) 목록. 강도 2=강한 단서/조합, 1=보조."""
+    hits: list[tuple[str, int]] = []
+    for rule in MODUS_RULES:
+        matched, strength = _modus_rule_matches(text, rule)
+        if not matched:
+            continue
+        if not _modus_type_compatible(primary, rule):
+            continue
+        hits.append((rule["label"], strength))
+    hits.sort(key=lambda item: (-item[1], item[0]))
     return hits
+
+
+def detect_modus_operandi(text: str, primary: str | None = None) -> list[str]:
+    """호환용 — 수법 라벨만 반환."""
+    return [label for label, _strength in detect_modus_operandi_detailed(text, primary)]
 
 
 def analyze_crime_method(title: str, description: str, keywords: list[str]) -> dict:
@@ -2538,21 +2826,50 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
             "watch": "금전·개인정보 요구, 링크 클릭 유도가 있으면 일단 중단하고 공식 경로로 확인하세요.",
         },
     )
-    tactics = detect_modus_operandi(combined)
-    if tactics:
+
+    title_hits = detect_modus_operandi_detailed(title, primary)
+    body_hits = detect_modus_operandi_detailed(combined, primary)
+    # 제목 단서 우선, 라벨 기준 중복 제거
+    merged: dict[str, int] = {}
+    for label, strength in title_hits:
+        merged[label] = max(merged.get(label, 0), strength + 1)  # 제목 가중
+    for label, strength in body_hits:
+        merged[label] = max(merged.get(label, 0), strength)
+    ranked = sorted(merged.items(), key=lambda item: (-item[1], item[0]))
+    tactics = [label for label, _ in ranked]
+
+    title_bonus = bool(title_hits)
+    strong_count = sum(1 for _label, strength in ranked if strength >= 2)
+    if (len(tactics) >= 2 and strong_count >= 1) or (title_bonus and strong_count >= 1):
+        confidence = "high"
+    elif tactics:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    if confidence == "high":
         how_detail = (
             f"이 기사에서는 **{primary}** 유형으로 보이며, "
-            f"구체적으로 **{' / '.join(tactics)}** 방식이 언급됩니다. "
+            f"구체적으로 **{' / '.join(tactics)}** 방식이 확인됩니다. "
+            f"{profile['how']}"
+        )
+    elif confidence == "medium":
+        how_detail = (
+            f"이 기사는 **{primary}** 관련으로 보이며, "
+            f"요약상 **{' / '.join(tactics)}** 방식으로 **추정**됩니다. "
             f"{profile['how']}"
         )
     else:
         how_detail = (
-            f"이 기사는 **{primary}** 관련 보도로 분석됩니다. {profile['how']}"
+            f"이 기사는 **{primary}** 관련 보도로 **추정**됩니다. "
+            f"구체 수법 단서가 부족해 유형 기본 설명을 안내합니다. {profile['how']}"
         )
+
     return {
         "primary": primary,
         "keywords": keywords,
         "tactics": tactics,
+        "confidence": confidence,
         "how_detail": how_detail,
         "watch": profile["watch"],
         "snippet": description[:180] + ("…" if len(description) > 180 else ""),
@@ -2561,7 +2878,7 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
 
 @st.cache_data(ttl=NAVER_API_CACHE_TTL, show_spinner=False)
 def fetch_moa_keyword_news(
-    client_id: str, client_secret: str, keyword: str, _cache_ver: int = 5
+    client_id: str, client_secret: str, keyword: str, _cache_ver: int = 7
 ) -> tuple[list[dict], str | None]:
     """Da Moa — 키워드 1개당 네이버 API 1회 호출 (최대 100건, 키워드 연관 기사 전체)."""
     try:
@@ -2598,6 +2915,9 @@ def fetch_moa_keyword_news(
                 continue
 
             matched = match_phishing_keywords(f"{title} {description}")
+            # Da Moa 전용 키워드(예: 전세사기)는 추적 목록에 없어도 선택 키워드로 표기
+            if keyword and keyword not in matched:
+                matched = [keyword] + matched
             analysis = analyze_crime_method(title, description, matched)
             seen.add(link)
             articles.append(
@@ -2616,15 +2936,16 @@ def fetch_moa_keyword_news(
             continue
 
     articles.sort(key=lambda x: x["datetime"], reverse=True)
-    return articles, None
+    return dedupe_articles_by_title(articles), None
 
 
 @st.cache_data(ttl=NAVER_API_CACHE_TTL, show_spinner=False)
-def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 45):
+def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 56):
     """
     1) 피싱·보이스피싱·금융사기 등 관련 키워드로 뉴스 전체 수집
-    2) 수집 기사 중 범죄 행위·수단이 드러나는 기사만 추려 키워드·주의보 분석
-    3) 상위 5개 행위 키워드로 재검색 후 병합
+    2) 수집 기사 중 범죄 행위·수단이 드러나는 기사만 추려 재검색 키워드 분석
+    3) 상위 10개 행위 키워드로 재검색 후 병합 (백서·목록용)
+    피싱 주의보: 1단계 피싱 관련 기사 중 홍보·표창 등만 제외해 집계 (실제사례 필터 미적용)
     """
     headers = naver_news_search_headers(client_id, client_secret)
 
@@ -2676,8 +2997,8 @@ def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 45
                 ):
                     continue
 
-                tactics = detect_modus_operandi(combined)
                 analysis = analyze_crime_method(title, description, matched)
+                tactics = analysis["tactics"]
                 score = relevance_score(title, matched, tactics, description)
                 seen.add(link)
                 articles.append(
@@ -2716,8 +3037,9 @@ def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 45
     # --- 2단계: 범죄 행위·수단이 드러나는 기사만 추려 키워드 분석 ---
     crime_action_articles = []
     for article in all_phishing_articles:
+        primary = (article.get("keywords") or [None])[0]
         tactics = article.get("tactics") or detect_modus_operandi(
-            f"{article['title']} {article['description']}"
+            f"{article['title']} {article['description']}", primary
         )
         if is_crime_action_article(
             article["title"], article["description"], article["keywords"], tactics
@@ -2732,6 +3054,25 @@ def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 45
         crime_only=True,
     )
     top_keywords = filter_keywords_for_research(keyword_rank)
+
+    # 피싱 주의보: 실제사례·범죄행위 필터 없이, 홍보·표창 등만 제외
+    alert_articles = [
+        a
+        for a in all_phishing_articles
+        if a["datetime"] >= past_alert
+        and not is_alert_promo_excluded_article(
+            a["title"], a.get("description", ""), a.get("link", "")
+        )
+    ]
+    alert_keyword_rank = scrape_keyword_frequency(
+        alert_articles,
+        top_n=10,
+        exclude_keywords=GENERIC_SEED_EXCLUDE,
+        crime_only=True,
+    )
+    alert_crime_hits: list[str] = []
+    for article in alert_articles:
+        alert_crime_hits.extend(article.get("keywords") or [])
 
     # --- 3단계: 행위 키워드로 재검색 ---
     raw_second = []
@@ -2777,18 +3118,20 @@ def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 45
     all_news.sort(key=lambda x: x["datetime"], reverse=True)
 
     method_news = []
-    alert_crime_hits = []
-    merged_crime_action_articles = []
     for article in merged_articles:
+        primary = (article.get("keywords") or [None])[0]
         tactics = article.get("tactics") or detect_modus_operandi(
-            f"{article['title']} {article['description']}"
+            f"{article['title']} {article['description']}", primary
         )
         if not is_crime_action_article(
             article["title"], article["description"], article["keywords"], tactics
         ):
             continue
         article["tactics"] = tactics
-        merged_crime_action_articles.append(article)
+        # 분석 문구·신뢰도를 강화 규칙으로 재생성
+        article["analysis"] = analyze_crime_method(
+            article["title"], article["description"], article.get("keywords") or []
+        )
         if is_editorial_or_opinion_article(
             article["title"], article["description"], article.get("link", "")
         ):
@@ -2805,19 +3148,18 @@ def fetch_phishing_news(client_id: str, client_secret: str, _cache_ver: int = 45
             article["title"], article["description"], article["keywords"], tactics
         ):
             method_news.append(article)
-            if article["datetime"] >= past_alert:
-                alert_crime_hits.extend(article["keywords"])
-
-    alert_keyword_rank = scrape_keyword_frequency(
-        [a for a in merged_crime_action_articles if a["datetime"] >= past_alert],
-        top_n=10,
-        exclude_keywords=GENERIC_SEED_EXCLUDE,
-        crime_only=True,
-    )
 
     method_news.sort(key=lambda x: (x["score"], x["datetime"]), reverse=True)
+    method_news = dedupe_articles_by_title(method_news)
 
-    return method_news, all_news, alert_crime_hits, errors, alert_keyword_rank
+    return (
+        method_news,
+        all_news,
+        alert_crime_hits,
+        errors,
+        alert_keyword_rank,
+        alert_articles,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2832,10 +3174,17 @@ if not client_id or not client_secret:
     )
     st.stop()
 
-with st.spinner("보이스피싱, 스미싱, 딥페이크 등 최신 금융사기 뉴스를 수집·분석 중입니다."):
-    news_list, all_news_list, alert_crime_hits, fetch_errors, alert_keywords = (
-        fetch_phishing_news(client_id, client_secret, _cache_ver=45)
-    )
+with st.spinner(
+    "보이스피싱, 스미싱, 딥페이크 등 전기통신금융사기 뉴스를 수집·분석 중입니다."
+):
+    (
+        news_list,
+        all_news_list,
+        alert_crime_hits,
+        fetch_errors,
+        alert_keywords,
+        alert_news,
+    ) = fetch_phishing_news(client_id, client_secret, _cache_ver=56)
 
 if fetch_errors and not news_list:
     st.error("뉴스 데이터를 가져오지 못했습니다.\n\n- " + "\n- ".join(fetch_errors))
@@ -2844,8 +3193,6 @@ elif fetch_errors:
     st.warning("일부 검색만 실패했습니다: " + " / ".join(fetch_errors))
 
 crime_counter = Counter(alert_crime_hits)
-past_alert = datetime.now() - timedelta(days=ALERT_LOOKBACK_DAYS)
-alert_news = [n for n in news_list if n.get("datetime") and n["datetime"] >= past_alert]
 
 # ---------------------------------------------------------------------------
 # 홈 화면: 긴급 주의보
@@ -2856,22 +3203,27 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.write(
-    "보이스피싱, 스미싱, 딥페이크 등 최신 금융사기 뉴스를 수집·분석하여 "
+    "보이스피싱, 스미싱, 딥페이크 등 최신 전기통신금융사기 뉴스를 수집·분석하여 "
     "실제 범행 수법과 피해 사례를 짚어보고, 이를 바탕으로 한 실질적인 "
     "피싱 주의보와 예방 정보를 안내해 드립니다."
 )
 st.caption("뉴스 검색: **네이버 OPEN API** (Search API)")
 
 if alert_keywords:
-    top_crime, top_count = alert_keywords[0]
-    alert = build_urgent_alert_info(top_crime, top_count, alert_news)
+    tied = select_tied_top_keywords(alert_keywords)
+    top_crimes = [kw for kw, _ in tied]
+    top_count = tied[0][1]
+    alert = build_urgent_alert_info(top_crimes, top_count, alert_news)
     render_phishing_alert_block(alert)
-    render_alert_moa_keyword_link(alert["keyword"])
+    render_alert_moa_keyword_link(alert["keywords"])
 elif crime_counter:
-    top_crime, top_count = crime_counter.most_common(1)[0]
-    alert = build_urgent_alert_info(top_crime, top_count, alert_news)
+    ranked = crime_counter.most_common()
+    tied = select_tied_top_keywords(ranked)
+    top_crimes = [kw for kw, _ in tied]
+    top_count = tied[0][1]
+    alert = build_urgent_alert_info(top_crimes, top_count, alert_news)
     render_phishing_alert_block(alert)
-    render_alert_moa_keyword_link(alert["keyword"])
+    render_alert_moa_keyword_link(alert["keywords"])
 else:
     st.success("🟢 최근 2주간 두드러진 피싱 키워드는 없습니다.")
 
@@ -2942,6 +3294,17 @@ if st.session_state.pop("scroll_to_moa", False):
 st.markdown('<div id="moa-section"></div>', unsafe_allow_html=True)
 render_moa_section_header()
 
+# 직접 검색 예약값 — selectbox 위젯 생성 전에 session_state 반영
+_pending_custom = st.session_state.pop("moa_pending_custom", None)
+if _pending_custom:
+    st.session_state.moa_active_keyword = _pending_custom
+    st.session_state.moa_search_source = "custom"
+    st.session_state.moa_display_count = 5
+    st.session_state.moa_last_picked = None
+    st.session_state.moa_keyword_picker = None
+    st.session_state.pop("moa_from_alert_nav", None)
+    st.session_state.pop("moa_alert_display_kw", None)
+
 st.markdown(
     '<p class="phishing-moa-picker-hint">📌 수법·유형 키워드를 선택해 주세요</p>',
     unsafe_allow_html=True,
@@ -2956,6 +3319,35 @@ picked = st.selectbox(
     key="moa_keyword_picker",
 )
 
+st.markdown(
+    '<p class="phishing-moa-picker-hint">🔎 또는 검색어를 직접 입력해 주세요</p>',
+    unsafe_allow_html=True,
+)
+with st.form("moa_custom_search_form", clear_on_submit=False):
+    search_cols = st.columns([4, 1])
+    with search_cols[0]:
+        st.text_input(
+            "직접 검색",
+            placeholder="예: 메신저피싱, 대포통장, 전세사기",
+            label_visibility="collapsed",
+            key="moa_custom_input",
+            max_chars=40,
+        )
+    with search_cols[1]:
+        moa_custom_clicked = st.form_submit_button(
+            "검색",
+            use_container_width=True,
+            type="primary",
+        )
+
+if moa_custom_clicked:
+    custom_q = (st.session_state.get("moa_custom_input") or "").strip()
+    if len(custom_q) < 2:
+        st.warning("검색어는 2자 이상 입력해 주세요.")
+    else:
+        st.session_state.moa_pending_custom = custom_q
+        st.rerun()
+
 if picked != st.session_state.get("moa_last_picked"):
     st.session_state.moa_last_picked = picked
     st.session_state.moa_display_count = 5
@@ -2963,10 +3355,11 @@ if picked != st.session_state.get("moa_last_picked"):
     st.session_state.pop("moa_alert_display_kw", None)
     if picked:
         st.session_state.moa_active_keyword = picked
-    else:
+        st.session_state.moa_search_source = "picker"
+    elif st.session_state.get("moa_search_source") != "custom":
         st.session_state.pop("moa_active_keyword", None)
 
-selected_kw = picked or st.session_state.get("moa_active_keyword")
+selected_kw = st.session_state.get("moa_active_keyword") or picked
 moa_articles: list[dict] = []
 moa_error: str | None = None
 moa_crime_only = False
@@ -2977,8 +3370,9 @@ if selected_kw:
         value=False,
         key="moa_crime_only",
         help=(
-            "체크 시 제목에 수법·검거·기승·편취·급증·적발·송치·구속·체포 "
-            "중 하나 이상 포함된 기사만 표시합니다. (피해 제외)"
+            "체크 시 제목 기준으로 "
+            "① 검거·송치·구속·체포·적발·기소·피의자·일당 등 수사·사법 표현, 또는 "
+            "② 편취·수법·기승 등 + 일당·속아·억원 등 사건 신호가 함께 있는 기사만 표시합니다."
         ),
     )
     with st.spinner(f"「{selected_kw}」 관련 기사 불러오는 중…"):
@@ -3035,12 +3429,12 @@ if selected_kw:
 
         remaining_moa = len(moa_articles) - st.session_state.moa_display_count
         if remaining_moa > 0:
-            add_count = min(5, remaining_moa)
+            add_count = min(10, remaining_moa)
             if st.button(
                 f"🔽 「{selected_kw}」 더보기 ({add_count}개 추가)",
-                key=f"moa_more_{selected_kw}",
+                key="moa_more_" + re.sub(r"\W+", "_", selected_kw),
             ):
-                st.session_state.moa_display_count += 5
+                st.session_state.moa_display_count += 10
                 st.rerun()
         else:
             st.caption(f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다.")
