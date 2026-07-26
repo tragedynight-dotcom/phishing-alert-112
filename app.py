@@ -2625,9 +2625,12 @@ def scroll_to_dom_id(
     delay_ms: int = 80,
     retries: tuple[int, ...] = (0, 200),
     fallback_selector: str | None = None,
+    offset_px: int = 80,
 ) -> None:
     """리런 후 스크롤 위치 복원.
 
+    offset_px만큼 위에 여백을 두어 제목(주의 키워드·최신 기사 등)이
+    화면 밖으로 올라가지 않게 합니다.
     휠·터치 등 사용자 스크롤이 감지되면 즉시 중단해 튕김을 막습니다.
     """
     delays = [delay_ms + r for r in retries]
@@ -2638,9 +2641,9 @@ def scroll_to_dom_id(
         "(function(){"
         f"const _nonce={json.dumps(nonce)};"
         f"const id={json.dumps(element_id)};"
-        f"const block={json.dumps(block)};"
         f"const delays={json.dumps(delays)};"
         f"const fallback={json.dumps(fallback_selector)};"
+        f"const offset={int(offset_px)};"
         "const d=window.parent.document;"
         "const w=window.parent;"
         "let cancelled=false;"
@@ -2666,36 +2669,24 @@ def scroll_to_dom_id(
         "return d.getElementById(id)"
         "|| (fallback ? d.querySelector(fallback) : null);"
         "}"
-        "function scrollParents(el){"
-        "let n=el.parentElement;"
-        "while(n){"
-        "const st=w.getComputedStyle(n);"
-        "const oy=st.overflowY;"
-        "if((oy==='auto'||oy==='scroll'||oy==='overlay') && n.scrollHeight>n.clientHeight+8){"
-        "const top=el.getBoundingClientRect().top"
-        "-n.getBoundingClientRect().top + n.scrollTop - 16;"
-        "n.scrollTop=Math.max(0,top);"
-        "}"
-        "n=n.parentElement;"
-        "}"
-        "}"
         "function go(){"
         "if(cancelled) return;"
         "const el=findEl();"
         "if(!el) return;"
-        "try{el.scrollIntoView({behavior:'instant',block:block});}catch(e){}"
-        "scrollParents(el);"
-        "const mains=["
-        "d.querySelector('[data-testid=\"stMain\"]'),"
-        "d.querySelector('section.main'),"
-        "d.querySelector('[data-testid=\"stAppViewContainer\"]')"
-        "];"
-        "mains.forEach(function(main){"
-        "if(!main) return;"
+        "const main=d.querySelector('[data-testid=\"stMain\"]')"
+        "|| d.querySelector('section.main')"
+        "|| d.querySelector('[data-testid=\"stAppViewContainer\"]')"
+        "|| d.scrollingElement;"
+        "if(main){"
         "const top=el.getBoundingClientRect().top"
-        "-main.getBoundingClientRect().top + (main.scrollTop||0) - 16;"
+        "-main.getBoundingClientRect().top + (main.scrollTop||0) - offset;"
         "try{main.scrollTop=Math.max(0,top);}catch(e){}"
-        "});"
+        "return;"
+        "}"
+        "try{"
+        "const y=el.getBoundingClientRect().top + (w.scrollY||0) - offset;"
+        "w.scrollTo(0, Math.max(0,y));"
+        "}catch(e){}"
         "}"
         "delays.forEach(function(t){timers.push(setTimeout(go, t));});"
         "timers.push(setTimeout(function(){"
@@ -2716,10 +2707,10 @@ def scroll_to_alert_screen() -> None:
     """주의보(키워드·예방 포인트) 화면으로 스크롤."""
     scroll_to_dom_id(
         "alert-stay-anchor",
-        block="start",
         delay_ms=0,
         retries=_SECTION_SCROLL_RETRIES,
         fallback_selector=".phishing-alert-hero",
+        offset_px=72,
     )
 
 
@@ -2727,10 +2718,10 @@ def scroll_to_method_screen() -> None:
     """피싱 수법 Da Moa 화면으로 스크롤."""
     scroll_to_dom_id(
         "method-stay-anchor",
-        block="start",
         delay_ms=0,
         retries=_SECTION_SCROLL_RETRIES,
         fallback_selector=".phishing-backseo-hero",
+        offset_px=72,
     )
 
 
@@ -2738,10 +2729,10 @@ def scroll_to_moa_screen() -> None:
     """키워드(최신 피싱 기사 Da Moa) 화면으로 스크롤."""
     scroll_to_dom_id(
         "moa-stay-anchor",
-        block="start",
         delay_ms=0,
         retries=_SECTION_SCROLL_RETRIES,
         fallback_selector=".phishing-moa-hero",
+        offset_px=72,
     )
 
 
@@ -2909,10 +2900,9 @@ def render_more_with_close(
 
 def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
     """예방 포인트 바로 아래 — 주의 키워드 기사 목록."""
-    st.markdown('<div id="alert-news-section"></div>', unsafe_allow_html=True)
-
     st.markdown(
-        f'<p class="phishing-moa-card-label">🚨 주의 키워드 「{html.escape(keyword)}」 '
+        f'<p class="phishing-moa-card-label" id="alert-news-section">'
+        f"🚨 주의 키워드 「{html.escape(keyword)}」 "
         f"기사 목록 {len(articles)}건</p>",
         unsafe_allow_html=True,
     )
@@ -2951,9 +2941,9 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
     if focus_idx is not None:
         scroll_to_dom_id(
             "alert-article-focus",
-            block="start",
             delay_ms=0,
             retries=_MORE_SCROLL_RETRIES,
+            offset_px=32,
         )
 
     remaining = len(articles) - st.session_state.moa_display_count
@@ -3968,7 +3958,12 @@ if st.session_state.get("moa_search_source") == "alert":
         render_alert_inline_articles(_alert_arts, _alert_kw)
 
 if st.session_state.pop("scroll_to_alert_news", False):
-    scroll_to_dom_id("alert-news-section", block="start", delay_ms=60)
+    scroll_to_dom_id(
+        "alert-news-section",
+        delay_ms=0,
+        retries=_SECTION_SCROLL_RETRIES,
+        offset_px=96,
+    )
 
 st.divider()
 
@@ -4023,9 +4018,9 @@ if news_list:
         if focus_method_idx is not None:
             scroll_to_dom_id(
                 "method-article-focus",
-                block="start",
                 delay_ms=0,
                 retries=_MORE_SCROLL_RETRIES,
+                offset_px=32,
             )
 
         remaining = len(news_list) - st.session_state.display_count
@@ -4063,10 +4058,10 @@ st.divider()
 if st.session_state.pop("scroll_to_moa", False):
     scroll_to_dom_id(
         "moa-section",
-        block="start",
         delay_ms=0,
         retries=_SECTION_SCROLL_RETRIES,
         fallback_selector=".phishing-moa-hero",
+        offset_px=72,
     )
 
 st.markdown('<div id="moa-section"></div>', unsafe_allow_html=True)
@@ -4210,8 +4205,8 @@ if moa_crime_only and moa_articles:
 if selected_kw and not moa_from_alert:
     moa_more_key = _moa_more_button_key(selected_kw)
     st.session_state.moa_more_key_last = moa_more_key
-    st.markdown('<div id="moa-articles-section"></div>', unsafe_allow_html=True)
     if moa_error:
+        st.markdown('<div id="moa-articles-section"></div>', unsafe_allow_html=True)
         st.error(moa_error)
         discard_widget_key(moa_more_key)
         st.session_state.pop("moa_crime_only", None)
@@ -4223,7 +4218,8 @@ if selected_kw and not moa_from_alert:
         with label_col:
             st.markdown(
                 f'<div class="phishing-moa-label-row">'
-                f'<p class="phishing-moa-card-label">「{html.escape(str(selected_kw))}」 최신 기사 '
+                f'<p class="phishing-moa-card-label" id="moa-articles-section">'
+                f"「{html.escape(str(selected_kw))}」 최신 기사 "
                 f"{len(moa_articles)}건</p></div>",
                 unsafe_allow_html=True,
             )
@@ -4274,9 +4270,9 @@ if selected_kw and not moa_from_alert:
             if focus_moa_idx is not None:
                 scroll_to_dom_id(
                     "moa-article-focus",
-                    block="start",
                     delay_ms=0,
                     retries=_MORE_SCROLL_RETRIES,
+                    offset_px=32,
                 )
 
             remaining_moa = len(moa_articles) - st.session_state.moa_display_count
@@ -4324,14 +4320,13 @@ if selected_kw and not moa_from_alert:
                 close_moa_keyword_list()
                 st.rerun()
 
-    # 키워드·직접 검색 직후 기사 목록으로 이동
+    # 키워드·직접 검색 직후 제목(최신 기사 N건)이 보이도록 이동
     if st.session_state.pop("scroll_to_moa_articles", False):
         scroll_to_dom_id(
             "moa-articles-section",
-            block="start",
             delay_ms=0,
             retries=_SECTION_SCROLL_RETRIES,
-            fallback_selector=".phishing-moa-card-label",
+            offset_px=96,
         )
 
 st.caption(
