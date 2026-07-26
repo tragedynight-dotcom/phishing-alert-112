@@ -2622,7 +2622,9 @@ def clear_moa_keyword_selection() -> None:
     st.session_state.pop("moa_alert_display_kw", None)
     st.session_state.pop("moa_alert_bound_to_picker", None)
     st.session_state.pop("alert_inline_close_cb", None)
-    st.session_state.moa_keyword_picker = None
+    st.session_state.pop("moa_list_close_cb", None)
+    # selectbox 위젯이 이미 만들어진 뒤에는 key를 직접 수정할 수 없음 → 다음 실행에서 비움
+    st.session_state.moa_pending_clear_picker = True
     st.session_state.moa_last_picked = None
     st.session_state.moa_display_count = 5
     # URL에 ?alert_moa= 가 남아 다시 켜지지 않도록 nonce 갱신
@@ -2692,25 +2694,46 @@ def trigger_moa_from_alert(alert_keyword: str) -> None:
     st.session_state.moa_custom_input = ""
 
 
+def render_more_with_close(
+    *,
+    more_label: str | None,
+    more_key: str | None,
+    close_key: str,
+    done_caption: str | None = None,
+) -> str | None:
+    """더보기 옆에 닫기(체크박스) — 'more' | 'close' | None."""
+    left, right = st.columns([4, 1])
+    action: str | None = None
+    with left:
+        if more_label and more_key:
+            if st.button(more_label, key=more_key, use_container_width=True):
+                action = "more"
+        elif done_caption:
+            st.caption(done_caption)
+    with right:
+        if st.checkbox("닫기", value=False, key=close_key):
+            action = "close"
+    return action
+
+
 def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
-    """예방 포인트 바로 아래 — 주의보 집계 기사 목록."""
+    """예방 포인트 바로 아래 — 주의 키워드 기사 목록."""
     st.markdown('<div id="alert-news-section"></div>', unsafe_allow_html=True)
 
     st.markdown(
-        f'<p class="phishing-moa-card-label">🚨 주의보 「{html.escape(keyword)}」 '
-        f"관련 기사 {len(articles)}건</p>",
+        f'<p class="phishing-moa-card-label">🚨 주의 키워드 「{html.escape(keyword)}」 '
+        f"기사 목록 {len(articles)}건</p>",
         unsafe_allow_html=True,
     )
-    # 범죄기사 체크박스와 같은 네모칸 형태
-    if st.checkbox("닫기", value=False, key="alert_inline_close_cb"):
-        clear_moa_keyword_selection()
-        st.rerun()
 
     if not articles:
-        st.info(f"「{keyword}」 주의보 집계에 포함된 기사가 없습니다.")
+        st.info(f"「{keyword}」 주의 키워드 기사 목록에 포함된 기사가 없습니다.")
+        if st.checkbox("닫기", value=False, key="alert_inline_close_cb"):
+            clear_moa_keyword_selection()
+            st.rerun()
         return
 
-    st.caption(f"주의보 「{keyword}」 {len(articles)}회 언급과 같은 기사입니다.")
+    st.caption(f"주의 키워드 「{keyword}」 {len(articles)}회 언급과 같은 기사입니다.")
     render_naver_api_attribution()
 
     visible = articles[: st.session_state.moa_display_count]
@@ -2732,14 +2755,25 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
     remaining = len(articles) - st.session_state.moa_display_count
     if remaining > 0:
         add_count = min(10, remaining)
-        if st.button(
-            f"🔽 「{keyword}」 더보기 ({add_count}개 추가)",
-            key="alert_inline_more_" + re.sub(r"\W+", "_", keyword),
-        ):
-            st.session_state.moa_display_count += 10
-            st.rerun()
+        action = render_more_with_close(
+            more_label=f"🔽 「{keyword}」 더보기 ({add_count}개 추가)",
+            more_key="alert_inline_more_" + re.sub(r"\W+", "_", keyword),
+            close_key="alert_inline_close_cb",
+        )
     else:
-        st.caption(f"「{keyword}」 기사 {len(articles)}건을 모두 표시했습니다.")
+        action = render_more_with_close(
+            more_label=None,
+            more_key=None,
+            close_key="alert_inline_close_cb",
+            done_caption=f"「{keyword}」 기사 {len(articles)}건을 모두 표시했습니다.",
+        )
+
+    if action == "more":
+        st.session_state.moa_display_count += 10
+        st.rerun()
+    elif action == "close":
+        clear_moa_keyword_selection()
+        st.rerun()
 
 
 # 파트2 스크랩용 추가 금융 사기 검색어
@@ -3669,35 +3703,56 @@ if news_list:
         '<p class="phishing-backseo-card-label">최신 수법 분석 및 예방</p>',
         unsafe_allow_html=True,
     )
-    current_visible_news = news_list[: st.session_state.display_count]
-
-    for idx, news in enumerate(current_visible_news, 1):
-        analysis = news["analysis"]
-        with st.container(border=True):
-            st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
-            st.caption(
-                f"📢 {news['press']} | 🗓️ {news['date']} | "
-                f"🏷️ {analysis['primary']}"
-                + (
-                    f" · {' · '.join(analysis['keywords'][1:])}"
-                    if len(analysis["keywords"]) > 1
-                    else ""
-                )
-            )
-
-            if analysis.get("snippet"):
-                st.write(analysis["snippet"])
-
-            render_app_analysis_block(analysis)
-
-    remaining = len(news_list) - st.session_state.display_count
-    if remaining > 0:
-        add_count = min(10, remaining)
-        if st.button(f"🔽 수법 기사 더보기 ({add_count}개 추가)", key="more_method"):
-            st.session_state.display_count += 10
+    if st.session_state.get("method_list_closed"):
+        if st.button("수법 기사 다시 보기", key="method_list_reopen"):
+            st.session_state.method_list_closed = False
+            st.session_state.display_count = 3
+            st.session_state.pop("method_list_close_cb", None)
             st.rerun()
     else:
-        st.caption(f"수법 중심 기사 {len(news_list)}건을 모두 표시했습니다.")
+        current_visible_news = news_list[: st.session_state.display_count]
+
+        for idx, news in enumerate(current_visible_news, 1):
+            analysis = news["analysis"]
+            with st.container(border=True):
+                st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
+                st.caption(
+                    f"📢 {news['press']} | 🗓️ {news['date']} | "
+                    f"🏷️ {analysis['primary']}"
+                    + (
+                        f" · {' · '.join(analysis['keywords'][1:])}"
+                        if len(analysis["keywords"]) > 1
+                        else ""
+                    )
+                )
+
+                if analysis.get("snippet"):
+                    st.write(analysis["snippet"])
+
+                render_app_analysis_block(analysis)
+
+        remaining = len(news_list) - st.session_state.display_count
+        if remaining > 0:
+            add_count = min(10, remaining)
+            method_action = render_more_with_close(
+                more_label=f"🔽 수법 기사 더보기 ({add_count}개 추가)",
+                more_key="more_method",
+                close_key="method_list_close_cb",
+            )
+        else:
+            method_action = render_more_with_close(
+                more_label=None,
+                more_key=None,
+                close_key="method_list_close_cb",
+                done_caption=f"수법 중심 기사 {len(news_list)}건을 모두 표시했습니다.",
+            )
+        if method_action == "more":
+            st.session_state.display_count += 10
+            st.rerun()
+        elif method_action == "close":
+            st.session_state.method_list_closed = True
+            st.session_state.pop("method_list_close_cb", None)
+            st.rerun()
 else:
     st.info("수법·사건 조건에 맞는 뉴스 기사가 없습니다.")
 
@@ -3720,7 +3775,7 @@ if st.session_state.pop("scroll_to_moa", False):
 st.markdown('<div id="moa-section"></div>', unsafe_allow_html=True)
 render_moa_section_header()
 
-# 직접 검색 예약값 — selectbox 위젯 생성 전에 session_state 반영
+# 직접 검색·닫기 예약값 — selectbox 위젯 생성 전에 session_state 반영
 _pending_custom = st.session_state.pop("moa_pending_custom", None)
 if _pending_custom:
     st.session_state.moa_active_keyword = _pending_custom
@@ -3730,6 +3785,11 @@ if _pending_custom:
     st.session_state.moa_keyword_picker = None
     st.session_state.pop("moa_from_alert_nav", None)
     st.session_state.pop("moa_alert_display_kw", None)
+    st.session_state.pop("moa_pending_clear_picker", None)
+
+if st.session_state.pop("moa_pending_clear_picker", False):
+    st.session_state.moa_keyword_picker = None
+    st.session_state.moa_last_picked = None
 
 st.markdown(
     '<div id="moa-keyword-picker-section"></div>'
@@ -3796,7 +3856,7 @@ if selected_kw and moa_from_alert:
     # 주의보 기사는 예방 포인트 아래에서 이미 표시
     display_kw = st.session_state.get("moa_alert_display_kw") or selected_kw
     st.info(
-        f"주의보 「{display_kw}」 관련 기사는 위 **예방 포인트 아래**에서 확인할 수 있습니다."
+        f"주의 키워드 「{display_kw}」 기사 목록은 위 **예방 포인트 아래**에서 확인할 수 있습니다."
     )
     st.session_state.pop("moa_from_alert_nav", None)
 elif selected_kw:
@@ -3863,19 +3923,34 @@ if selected_kw and not moa_from_alert:
         remaining_moa = len(moa_articles) - st.session_state.moa_display_count
         if remaining_moa > 0:
             add_count = min(10, remaining_moa)
-            if st.button(
-                f"🔽 「{selected_kw}」 더보기 ({add_count}개 추가)",
-                key="moa_more_" + re.sub(r"\W+", "_", selected_kw),
-            ):
-                st.session_state.moa_display_count += 10
-                st.rerun()
+            moa_action = render_more_with_close(
+                more_label=f"🔽 「{selected_kw}」 더보기 ({add_count}개 추가)",
+                more_key="moa_more_" + re.sub(r"\W+", "_", selected_kw),
+                close_key="moa_list_close_cb",
+            )
         else:
-            st.caption(f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다.")
+            moa_action = render_more_with_close(
+                more_label=None,
+                more_key=None,
+                close_key="moa_list_close_cb",
+                done_caption=(
+                    f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다."
+                ),
+            )
+        if moa_action == "more":
+            st.session_state.moa_display_count += 10
+            st.rerun()
+        elif moa_action == "close":
+            clear_moa_keyword_selection()
+            st.rerun()
     else:
         if moa_crime_only:
             st.info(f"「{selected_kw}」 관련 기사 중 범죄기사 조건에 맞는 기사가 없습니다.")
         else:
             st.info(f"「{selected_kw}」 관련 기사가 없습니다.")
+        if st.checkbox("닫기", value=False, key="moa_list_close_cb"):
+            clear_moa_keyword_selection()
+            st.rerun()
 
 st.caption(
     "본 서비스는 **민간 범죄 예방 안내용**이며, 수사기관·금융당국의 공식 경보·긴급 통보를 "
