@@ -2853,7 +2853,8 @@ def trigger_moa_from_alert(alert_keyword: str) -> None:
     st.session_state.moa_alert_bound_to_picker = False
     st.session_state.moa_display_count = 5
     st.session_state.moa_from_alert_nav = True
-    st.session_state.scroll_to_alert_news = True
+    # query_params 삭제로 추가 리런이 나도 스크롤이 유지되도록 2회
+    st.session_state.scroll_to_alert_news = 2
     st.session_state.moa_pending_clear_custom_input = True
     st.session_state.moa_pending_clear_custom_chip = True
 
@@ -2906,7 +2907,8 @@ def render_more_with_close(
 def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
     """예방 포인트 바로 아래 — 주의 키워드 기사 목록."""
     st.markdown(
-        f'<p class="phishing-moa-card-label" id="alert-news-section">'
+        '<div id="alert-news-section"></div>'
+        f'<p class="phishing-moa-card-label">'
         f"🚨 주의 키워드 「{html.escape(keyword)}」 "
         f"기사 목록 {len(articles)}건</p>",
         unsafe_allow_html=True,
@@ -4352,12 +4354,15 @@ if st.session_state.pop("scroll_stay_method_close", False):
 if st.session_state.pop("scroll_stay_moa_close", False):
     scroll_to_moa_screen()
 
-# 주의보 키워드 클릭 → 페이지 끝에서 스크롤 (모바일 터치 잔여 이벤트 대비)
-if st.session_state.pop("scroll_to_alert_news", False):
+# 주의보 키워드 클릭 → 기사 목록으로 화면 이동
+# (query_params 정리 리런까지 카운트다운으로 유지)
+_scroll_alert_left = int(st.session_state.get("scroll_to_alert_news") or 0)
+if _scroll_alert_left > 0:
+    st.session_state.scroll_to_alert_news = _scroll_alert_left - 1
     scroll_to_dom_id(
         "alert-news-section",
-        delay_ms=50,
-        retries=_SECTION_SCROLL_RETRIES,
+        delay_ms=80,
+        retries=(0, 120, 280, 520, 900),
         offset_px=96,
-        grace_ms=700,
+        grace_ms=900,
     )
