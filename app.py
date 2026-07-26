@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 import streamlit as st
@@ -116,6 +116,11 @@ def naver_news_search_params(query: str, display: int, start: int = 1) -> dict:
 st.markdown(
     """
     <style>
+    /* 입력칸 "Press Enter to submit form" 영문 안내 숨김 */
+    [data-testid="InputInstructions"] {
+      display: none !important;
+    }
+    .phishing-moa-search-wrap-anchor { display: none; }
     h1.phishing-mobile-title {
       font-size: 2.25rem;
       font-weight: 600;
@@ -133,6 +138,7 @@ st.markdown(
         padding-left: 0.5rem !important;
         padding-right: 0.5rem !important;
         max-width: 100% !important;
+        overflow-x: hidden !important;
       }
       h1.phishing-mobile-title,
       h2.phishing-mobile-title {
@@ -148,6 +154,44 @@ st.markdown(
       h2.phishing-mobile-title {
         margin-top: 0.6rem !important;
         margin-bottom: 0.2rem !important;
+      }
+      /* Da Moa 직접검색: 좁은 화면에서 칸이 옆으로 넘치지 않게 */
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stForm"] {
+        max-width: 100% !important;
+        overflow: hidden !important;
+      }
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stHorizontalBlock"] {
+        gap: 0.35rem !important;
+        flex-wrap: nowrap !important;
+        max-width: 100% !important;
+      }
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {
+        min-width: 0 !important;
+        flex: 1 1 auto !important;
+      }
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
+        flex: 0 0 auto !important;
+        width: auto !important;
+        min-width: 3.6rem !important;
+        max-width: 4.8rem !important;
+      }
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stTextInput"] input {
+        max-width: 100% !important;
+        font-size: 0.88rem !important;
+        text-overflow: ellipsis !important;
+      }
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stFormSubmitButton"] button {
+        min-width: 0 !important;
+        padding-left: 0.35rem !important;
+        padding-right: 0.35rem !important;
+        font-size: 0.82rem !important;
+        white-space: nowrap !important;
       }
     }
     .phishing-alert-badge {
@@ -225,6 +269,16 @@ st.markdown(
       word-break: keep-all;
       text-align: center;
     }
+    .phishing-alert-keyword-link {
+      color: #fff !important;
+      text-decoration: underline !important;
+      text-underline-offset: 0.14em;
+      text-decoration-thickness: 2px;
+      cursor: pointer;
+    }
+    .phishing-alert-keyword-link:hover {
+      color: #fee2e2 !important;
+    }
     .phishing-alert-kw-main {
       text-align: center;
       margin: 0.08rem 0 0.35rem;
@@ -276,10 +330,30 @@ st.markdown(
     .phishing-alert-watch strong {
       color: #1d4ed8;
     }
-    .phishing-alert-moa-nav {
-      margin-top: 0.7rem;
-      padding-top: 0.75rem;
-      border-top: 1px dashed #93c5fd;
+    .phishing-alert-guide-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem 1rem;
+      margin-top: 0.65rem;
+      margin-bottom: 0.35rem;
+      padding: 0.65rem 0.9rem;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+    .phishing-alert-guide-links a {
+      color: #1d4ed8 !important;
+      text-decoration: underline !important;
+      text-underline-offset: 0.12em;
+    }
+    .phishing-alert-guide-links a:hover {
+      color: #1e3a8a !important;
+    }
+    .phishing-alert-guide-sep {
+      color: #94a3b8;
+      font-weight: 500;
     }
     .phishing-app-analysis-block {
       border-top: 1px dashed #d1d5db;
@@ -354,6 +428,15 @@ st.markdown(
       padding: 0.22rem 0.7rem;
       font-size: 0.82rem;
       font-weight: 700;
+      color: #fff !important;
+      text-decoration: none !important;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    a.phishing-backseo-count:hover {
+      background: rgba(255, 255, 255, 0.28);
+      color: #fff !important;
+      text-decoration: none !important;
     }
     .phishing-backseo-card-label {
       font-size: 0.95rem;
@@ -431,6 +514,15 @@ st.markdown(
       padding: 0.22rem 0.7rem;
       font-size: 0.82rem;
       font-weight: 700;
+      color: #fff !important;
+      text-decoration: none !important;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    a.phishing-moa-count:hover {
+      background: rgba(255, 255, 255, 0.28);
+      color: #fff !important;
+      text-decoration: none !important;
     }
     .phishing-moa-card-label {
       font-size: 0.95rem;
@@ -975,30 +1067,76 @@ def render_naver_api_attribution() -> None:
     )
 
 
+def format_phishing_112_report_hint(keyword: str | list[str] | None) -> str:
+    """키워드에 맞춘 112 신고 안내 문구."""
+    if isinstance(keyword, list):
+        labels = [k for k in keyword if k]
+        label = " · ".join(labels) if labels else "피싱"
+    else:
+        label = (keyword or "").strip() or "피싱"
+    return f"「{label}」 의심 시 즉시 112에 신고해 주세요."
+
+
 def render_app_analysis_block(analysis: dict) -> None:
     """API 검색결과와 구분된 자체 범행 수법 분석 블록."""
     st.markdown('<div class="phishing-app-analysis-block"></div>', unsafe_allow_html=True)
     st.markdown(f"**🔎 범행 수법 분석:** {analysis['how_detail']}")
-    st.info(f"🛡️ 예방: {analysis['watch']}")
+    report_hint = format_phishing_112_report_hint(
+        analysis.get("primary") or (analysis.get("keywords") or [None])[0]
+    )
+    st.info(f"🛡️ 예방: {analysis['watch']} {report_hint}")
 
 
 def render_phishing_alert_block(alert: dict) -> None:
-    """피싱 주의보 — 강조형 카드 UI."""
+    """피싱 주의보 — 강조형 카드 UI. 키워드는 밑줄 링크로 Da Moa 이동."""
     keywords = alert.get("keywords") or [alert["keyword"]]
-    keyword_html = html.escape(" · ".join(keywords))
+    keywords = [kw for kw in keywords if kw]
     count = alert["count"]
+
+    _link_nonce = int(st.session_state.get("moa_alert_link_nonce") or 1)
+    link_parts = [
+        (
+            f'<a class="phishing-alert-keyword-link" '
+            f'href="?alert_moa={quote(kw)}&n={_link_nonce}" '
+            f'target="_self">{html.escape(kw)}</a>'
+        )
+        for kw in keywords
+    ]
+    keyword_html = " · ".join(link_parts)
 
     how_html = html.escape(alert["how_full"]).replace("\n", "<br>")
     watch_html = ""
+    report_hint = format_phishing_112_report_hint(keywords)
     if alert.get("watch"):
-        watch = html.escape(alert["watch"]).replace("\n", "<br>")
+        watch = html.escape(alert["watch"].strip()).replace("\n", "<br>")
+        report_html = html.escape(report_hint)
         watch_html = (
-            f'<div class="phishing-alert-watch"><strong>🛡️ 예방 포인트</strong><br>{watch}</div>'
+            f'<div class="phishing-alert-watch"><strong>🛡️ 예방 포인트</strong><br>'
+            f"{watch} {report_html}</div>"
         )
+    else:
+        watch_html = (
+            f'<div class="phishing-alert-watch"><strong>🛡️ 예방 포인트</strong><br>'
+            f"{html.escape(report_hint)}</div>"
+        )
+
+    guide_links_html = (
+        '<div class="phishing-alert-guide-links">'
+        '<a href="https://www.counterscam112.go.kr/main.do" '
+        'target="_blank" rel="noopener noreferrer">피싱안심SOS</a>'
+        '<span class="phishing-alert-guide-sep">·</span>'
+        '<a href="https://www.counterscam112.go.kr/bbs009/board/boardList.do" '
+        'target="_blank" rel="noopener noreferrer">피싱 시나리오</a>'
+        '<span class="phishing-alert-guide-sep">·</span>'
+        '<a href="https://www.counterscam112.go.kr/bbs010/board/boardList.do" '
+        'target="_blank" rel="noopener noreferrer">상황별 조치방법</a>'
+        "</div>"
+    )
 
     how_section = (
         f'<div class="phishing-alert-how"><strong>🔎 범행 진행 방식</strong><br>{how_html}</div>'
         f"{watch_html}"
+        f"{guide_links_html}"
     )
 
     st.markdown(
@@ -1025,7 +1163,9 @@ def render_phishing_alert_block(alert: dict) -> None:
 def render_backseo_section_header(article_count: int) -> None:
     """피싱 범죄 백서 섹션 헤더."""
     count_html = (
-        f'<span class="phishing-backseo-count">📋 수법·사건 기사 {article_count}건</span>'
+        f'<a class="phishing-backseo-count" href="#method-analysis-section" '
+        f'target="_self" rel="noopener">'
+        f"📋 수법·사건 기사 {article_count}건</a>"
         if article_count
         else ""
     )
@@ -1046,6 +1186,26 @@ def render_backseo_section_header(article_count: int) -> None:
         """,
         unsafe_allow_html=True,
     )
+    if article_count:
+        components.html(
+            """
+            <script>
+            (function () {
+              const d = window.parent.document;
+              const link = d.querySelector("a.phishing-backseo-count");
+              if (!link || link.dataset.scrollBound === "1") return;
+              link.dataset.scrollBound = "1";
+              link.addEventListener("click", function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const el = d.getElementById("method-analysis-section");
+                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            })();
+            </script>
+            """,
+            height=0,
+        )
 
 
 def render_moa_section_header() -> None:
@@ -1062,10 +1222,126 @@ def render_moa_section_header() -> None:
             궁금한 금융사기 유형을 고르면
             <strong>해당 키워드 최신 기사</strong>만 바로 불러옵니다.
           </div>
-          <span class="phishing-moa-count">👇 아래에서 키워드를 선택하세요</span>
+          <a class="phishing-moa-count" href="#moa-keyword-picker-section"
+             target="_self" rel="noopener">👇 아래에서 키워드를 선택하세요</a>
         </div>
         """,
         unsafe_allow_html=True,
+    )
+    components.html(
+        """
+        <script>
+        (function () {
+          const d = window.parent.document;
+          const w = window.parent;
+          const link = d.querySelector("a.phishing-moa-count");
+          if (!link || link.dataset.scrollBound === "1") return;
+          link.dataset.scrollBound = "1";
+
+          function fireClick(el) {
+            if (!el) return;
+            ["pointerdown", "mousedown", "mouseup", "click"].forEach(function (type) {
+              el.dispatchEvent(
+                new MouseEvent(type, {
+                  bubbles: true,
+                  cancelable: true,
+                  view: w,
+                })
+              );
+            });
+          }
+
+          function findMoaSelectbox() {
+            const marker = d.getElementById("moa-keyword-select-marker");
+            if (marker) {
+              let n = marker.closest('[data-testid="stElementContainer"]');
+              n = n ? n.nextElementSibling : null;
+              for (let i = 0; i < 8 && n; i++) {
+                const box = n.querySelector(
+                  '[data-testid="stSelectbox"], .stSelectbox'
+                );
+                if (box) return box;
+                n = n.nextElementSibling;
+              }
+            }
+            const anchor = d.getElementById("moa-keyword-picker-section");
+            if (anchor) {
+              let n = anchor.closest('[data-testid="stElementContainer"]');
+              n = n ? n.nextElementSibling : null;
+              for (let i = 0; i < 8 && n; i++) {
+                const box = n.querySelector(
+                  '[data-testid="stSelectbox"], .stSelectbox'
+                );
+                if (box) return box;
+                n = n.nextElementSibling;
+              }
+            }
+            return d.querySelector('[data-testid="stSelectbox"], .stSelectbox');
+          }
+
+          function openDropdownArrow(box) {
+            // 화살표(드롭다운 인디케이터) 우선 클릭 → 목록 현출
+            const arrow =
+              box.querySelector('[data-testid="stSelectboxChevron"]') ||
+              box.querySelector('[data-baseweb="select"] svg') ||
+              box.querySelector('[class*="dropdown"] svg') ||
+              box.querySelector("svg");
+            const combo =
+              box.querySelector('[role="combobox"]') ||
+              box.querySelector('[data-baseweb="select"] > div') ||
+              box.querySelector('[data-baseweb="select"]') ||
+              box.querySelector("input");
+
+            if (arrow) {
+              // svg 클릭이 안 먹으면 부모(화살표 영역) 클릭
+              fireClick(arrow.closest("div") || arrow);
+            }
+            if (combo) {
+              fireClick(combo);
+              try {
+                combo.focus();
+              } catch (err) {}
+              combo.dispatchEvent(
+                new KeyboardEvent("keydown", {
+                  key: "ArrowDown",
+                  code: "ArrowDown",
+                  keyCode: 40,
+                  which: 40,
+                  bubbles: true,
+                  cancelable: true,
+                })
+              );
+            }
+          }
+
+          function openMoaKeywordPicker() {
+            const anchor = d.getElementById("moa-keyword-picker-section");
+            if (anchor) {
+              anchor.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+            // 스크롤 안정화 후 화살표 클릭으로 목록 열기 (재시도)
+            var tries = 0;
+            function attempt() {
+              tries += 1;
+              const box = findMoaSelectbox();
+              if (box) {
+                openDropdownArrow(box);
+                return;
+              }
+              if (tries < 6) window.setTimeout(attempt, 120);
+            }
+            window.setTimeout(attempt, 280);
+          }
+
+          link.addEventListener("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            openMoaKeywordPicker();
+          });
+        })();
+        </script>
+        """,
+        height=0,
     )
 
 
@@ -2377,48 +2653,132 @@ def resolve_moa_search_keyword(alert_keyword: str) -> str:
     return map_alert_keyword_to_moa(alert_keyword) or alert_keyword
 
 
+def clear_moa_keyword_selection() -> None:
+    """키워드 선택(X)·닫기 시 주의보·검색 상태까지 함께 비웁니다."""
+    st.session_state.pop("moa_active_keyword", None)
+    st.session_state.pop("moa_search_source", None)
+    st.session_state.pop("moa_from_alert_nav", None)
+    st.session_state.pop("moa_alert_display_kw", None)
+    st.session_state.pop("moa_alert_bound_to_picker", None)
+    st.session_state.pop("alert_inline_close_cb", None)
+    st.session_state.moa_keyword_picker = None
+    st.session_state.moa_last_picked = None
+    st.session_state.moa_display_count = 5
+    # URL에 ?alert_moa= 가 남아 다시 켜지지 않도록 nonce 갱신
+    st.session_state.moa_alert_link_nonce = (
+        int(st.session_state.get("moa_alert_link_nonce") or 1) + 1
+    )
+    if "alert_moa" in st.query_params:
+        try:
+            del st.query_params["alert_moa"]
+        except Exception:
+            pass
+    if "n" in st.query_params:
+        try:
+            del st.query_params["n"]
+        except Exception:
+            pass
+
+
+def sync_alert_picker_clear() -> bool:
+    """키워드 selectbox가 X로 비워졌으면 주의보 기사 상태도 제거. True면 Cleared."""
+    if st.session_state.get("moa_search_source") != "alert":
+        return False
+    if not st.session_state.get("moa_alert_bound_to_picker"):
+        return False
+    # 위젯 값이 이미 None이면 사용자가 X로 해제한 것
+    if st.session_state.get("moa_keyword_picker"):
+        return False
+    clear_moa_keyword_selection()
+    return True
+
+
+def on_moa_keyword_picker_change() -> None:
+    """selectbox 변경/X 해제."""
+    picked = st.session_state.get("moa_keyword_picker")
+    st.session_state.moa_display_count = 5
+    if picked is None:
+        if st.session_state.get("moa_search_source") == "custom":
+            st.session_state.moa_last_picked = None
+            return
+        clear_moa_keyword_selection()
+        return
+    st.session_state.moa_last_picked = picked
+    st.session_state.moa_active_keyword = picked
+    st.session_state.moa_search_source = "picker"
+    st.session_state.pop("moa_from_alert_nav", None)
+    st.session_state.pop("moa_alert_display_kw", None)
+    st.session_state.pop("moa_alert_bound_to_picker", None)
+    st.session_state.moa_custom_input = ""
+
+
 def trigger_moa_from_alert(alert_keyword: str) -> None:
-    """주의보 키워드 클릭 → 집계에 쓰인 기사 목록으로 스크롤."""
+    """주의보 키워드 클릭 → 예방 포인트 아래 집계 기사 표시."""
     st.session_state.moa_active_keyword = alert_keyword
     st.session_state.moa_search_source = "alert"
     st.session_state.moa_alert_display_kw = alert_keyword
     if alert_keyword in MOA_KEYWORDS:
         st.session_state.moa_keyword_picker = alert_keyword
         st.session_state.moa_last_picked = alert_keyword
+        st.session_state.moa_alert_bound_to_picker = True
     else:
-        # 목록에 없는 키워드면 selectbox를 비워 두고, picker 변경 감지가
-        # 주의보 모드를 지우지 않도록 last_picked도 None으로 맞춤
         st.session_state.moa_keyword_picker = None
         st.session_state.moa_last_picked = None
+        st.session_state.moa_alert_bound_to_picker = False
     st.session_state.moa_display_count = 5
     st.session_state.moa_from_alert_nav = True
-    st.session_state.scroll_to_moa = True
+    st.session_state.scroll_to_alert_news = True
+    st.session_state.moa_custom_input = ""
 
 
-def render_alert_moa_keyword_link(alert_keywords: str | list[str]) -> None:
-    """예방 포인트 아래 — 주의보 키워드 클릭 → 집계 기사 목록."""
-    keywords = (
-        [alert_keywords] if isinstance(alert_keywords, str) else list(alert_keywords)
+def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
+    """예방 포인트 바로 아래 — 주의보 집계 기사 목록."""
+    st.markdown('<div id="alert-news-section"></div>', unsafe_allow_html=True)
+
+    st.markdown(
+        f'<p class="phishing-moa-card-label">🚨 주의보 「{html.escape(keyword)}」 '
+        f"관련 기사 {len(articles)}건</p>",
+        unsafe_allow_html=True,
     )
-    keywords = [kw for kw in keywords if kw]
-    if not keywords:
+    # 범죄기사 체크박스와 같은 네모칸 형태
+    if st.checkbox("닫기", value=False, key="alert_inline_close_cb"):
+        clear_moa_keyword_selection()
+        st.rerun()
+
+    if not articles:
+        st.info(f"「{keyword}」 주의보 집계에 포함된 기사가 없습니다.")
         return
 
-    st.markdown('<div class="phishing-alert-moa-nav">', unsafe_allow_html=True)
-    cols = st.columns(len(keywords)) if len(keywords) > 1 else [st.container()]
-    for idx, (col, keyword) in enumerate(zip(cols, keywords)):
-        with col:
-            if st.button(
-                f"📰 {keyword}",
-                key=f"alert_goto_moa_btn_{idx}_{keyword}",
-                help="클릭하면 주의보 횟수에 포함된 기사 목록으로 이동합니다.",
-                use_container_width=True,
-                type="secondary",
-            ):
-                trigger_moa_from_alert(keyword)
-                st.rerun()
-    st.caption("👆 클릭하면 아래 Da Moa에서 주의보 집계에 포함된 기사를 보여줍니다.")
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.caption(f"주의보 「{keyword}」 {len(articles)}회 언급과 같은 기사입니다.")
+    render_naver_api_attribution()
+
+    visible = articles[: st.session_state.moa_display_count]
+    for idx, news in enumerate(visible, 1):
+        kw_label = (
+            " · ".join(news["keywords"])
+            if news.get("keywords")
+            else (news.get("analysis") or {}).get("primary", keyword)
+        )
+        with st.container(border=True):
+            st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
+            st.caption(
+                f"📢 {news.get('press', '')} | 🗓️ {news.get('date', '')} | 🏷️ {kw_label}"
+            )
+            if news.get("description"):
+                snippet = news["description"]
+                st.write(snippet[:160] + ("…" if len(snippet) > 160 else ""))
+
+    remaining = len(articles) - st.session_state.moa_display_count
+    if remaining > 0:
+        add_count = min(10, remaining)
+        if st.button(
+            f"🔽 「{keyword}」 더보기 ({add_count}개 추가)",
+            key="alert_inline_more_" + re.sub(r"\W+", "_", keyword),
+        ):
+            st.session_state.moa_display_count += 10
+            st.rerun()
+    else:
+        st.caption(f"「{keyword}」 기사 {len(articles)}건을 모두 표시했습니다.")
 
 
 # 파트2 스크랩용 추가 금융 사기 검색어
@@ -3259,6 +3619,26 @@ elif fetch_errors:
 
 crime_counter = Counter(alert_crime_hits)
 
+# 주의보 키워드 하이퍼링크(?alert_moa=&n=) — nonce로 한 번만 적용, X 후 재점화 방지
+_alert_moa_q = st.query_params.get("alert_moa")
+_alert_moa_n = st.query_params.get("n")
+if _alert_moa_q:
+    _nonce = str(_alert_moa_n or "")
+    _consumed = str(st.session_state.get("moa_alert_consumed_nonce") or "")
+    if _nonce and _nonce != _consumed:
+        trigger_moa_from_alert(str(_alert_moa_q))
+        st.session_state.moa_alert_consumed_nonce = _nonce
+        st.session_state.moa_alert_link_nonce = int(_nonce) + 1
+    for _qp in ("alert_moa", "n"):
+        if _qp in st.query_params:
+            try:
+                del st.query_params[_qp]
+            except Exception:
+                pass
+
+# 키워드 선택 X로 picker가 비워진 경우 — 예방 포인트 아래 기사보다 먼저 정리
+sync_alert_picker_clear()
+
 # ---------------------------------------------------------------------------
 # 홈 화면: 긴급 주의보
 # ---------------------------------------------------------------------------
@@ -3269,8 +3649,8 @@ st.markdown(
 )
 st.write(
     "보이스피싱, 스미싱, 딥페이크 등 최신 전기통신금융사기 뉴스를 수집·분석하여 "
-    "실제 범행 수법과 피해 사례를 짚어보고, 이를 바탕으로 한 실질적인 "
-    "피싱 주의보와 예방 정보를 안내해 드립니다."
+    "실제 범행 수법과 피해 사례를 확인하고, 이를 바탕으로 한 최근 피싱범죄 키워드와 "
+    "예방 정보를 함께 안내해 드립니다."
 )
 st.caption("뉴스 검색: **네이버 OPEN API** (Search API)")
 
@@ -3280,7 +3660,6 @@ if alert_keywords:
     top_count = tied[0][1]
     alert = build_urgent_alert_info(top_crimes, top_count, alert_news)
     render_phishing_alert_block(alert)
-    render_alert_moa_keyword_link(alert["keywords"])
 elif crime_counter:
     ranked = crime_counter.most_common()
     tied = select_tied_top_keywords(ranked)
@@ -3288,9 +3667,29 @@ elif crime_counter:
     top_count = tied[0][1]
     alert = build_urgent_alert_info(top_crimes, top_count, alert_news)
     render_phishing_alert_block(alert)
-    render_alert_moa_keyword_link(alert["keywords"])
 else:
     st.success("🟢 최근 2주간 두드러진 피싱 키워드는 없습니다.")
+
+# 주의보 키워드 선택 시 — 예방 포인트 바로 아래 기사
+if st.session_state.get("moa_search_source") == "alert":
+    _alert_kw = (
+        st.session_state.get("moa_alert_display_kw")
+        or st.session_state.get("moa_active_keyword")
+    )
+    if _alert_kw:
+        _alert_arts = filter_articles_by_alert_keyword(alert_news, _alert_kw)
+        render_alert_inline_articles(_alert_arts, _alert_kw)
+
+if st.session_state.pop("scroll_to_alert_news", False):
+    components.html(
+        "<script>"
+        "(function(){const d=window.parent.document;"
+        "const el=d.getElementById('alert-news-section');"
+        "if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}"
+        "})();"
+        "</script>",
+        height=0,
+    )
 
 st.divider()
 
@@ -3305,6 +3704,7 @@ if news_list:
         "※ 각 기사 아래 **범행 수법 분석·예방**은 본 서비스가 공개 요약을 바탕으로 자동 정리한 내용입니다."
     )
     st.markdown(
+        '<div id="method-analysis-section"></div>'
         '<p class="phishing-backseo-card-label">최신 수법 분석 및 예방</p>',
         unsafe_allow_html=True,
     )
@@ -3371,7 +3771,12 @@ if _pending_custom:
     st.session_state.pop("moa_alert_display_kw", None)
 
 st.markdown(
+    '<div id="moa-keyword-picker-section"></div>'
     '<p class="phishing-moa-picker-hint">📌 수법·유형 키워드를 선택해 주세요</p>',
+    unsafe_allow_html=True,
+)
+st.markdown(
+    '<div id="moa-keyword-select-marker"></div>',
     unsafe_allow_html=True,
 )
 
@@ -3382,27 +3787,41 @@ picked = st.selectbox(
     placeholder="키워드 선택",
     label_visibility="collapsed",
     key="moa_keyword_picker",
+    on_change=on_moa_keyword_picker_change,
 )
+
+# X로 비운 뒤에도 주의보 상태가 남아 있으면 한 번 더 정리 후 새로고침
+if (
+    picked is None
+    and st.session_state.get("moa_search_source") == "alert"
+    and st.session_state.get("moa_alert_bound_to_picker")
+):
+    clear_moa_keyword_selection()
+    st.rerun()
 
 st.markdown(
     '<p class="phishing-moa-picker-hint">🔎 또는 검색어를 직접 입력해 주세요</p>',
     unsafe_allow_html=True,
 )
-with st.form("moa_custom_search_form", clear_on_submit=False):
-    search_cols = st.columns([4, 1])
-    with search_cols[0]:
+st.markdown(
+    '<div class="phishing-moa-search-wrap-anchor"></div>',
+    unsafe_allow_html=True,
+)
+# form + Enter 제출 — 입력 후 엔터로도 검색
+with st.form("moa_custom_search_form", clear_on_submit=False, border=False):
+    custom_col, search_col = st.columns([5, 2], gap="small")
+    with custom_col:
         st.text_input(
             "직접 검색",
-            placeholder="예: 메신저피싱, 대포통장, 전세사기",
+            placeholder="예: 노쇼, 대포통장 등",
             label_visibility="collapsed",
             key="moa_custom_input",
             max_chars=40,
         )
-    with search_cols[1]:
+    with search_col:
         moa_custom_clicked = st.form_submit_button(
-            "검색",
+            "🔍 검색",
             use_container_width=True,
-            type="primary",
         )
 
 if moa_custom_clicked:
@@ -3413,48 +3832,41 @@ if moa_custom_clicked:
         st.session_state.moa_pending_custom = custom_q
         st.rerun()
 
-if picked != st.session_state.get("moa_last_picked"):
-    # 주의보 모드에서 목록 밖 키워드(picker=None)는 유지
-    if not (
-        st.session_state.get("moa_search_source") == "alert"
-        and picked is None
-        and st.session_state.get("moa_active_keyword")
-    ):
-        st.session_state.moa_last_picked = picked
-        st.session_state.moa_display_count = 5
-        st.session_state.pop("moa_from_alert_nav", None)
-        st.session_state.pop("moa_alert_display_kw", None)
-        if picked:
-            st.session_state.moa_active_keyword = picked
-            st.session_state.moa_search_source = "picker"
-        elif st.session_state.get("moa_search_source") not in ("custom", "alert"):
-            st.session_state.pop("moa_active_keyword", None)
-
 selected_kw = st.session_state.get("moa_active_keyword") or picked
 moa_articles: list[dict] = []
 moa_error: str | None = None
 moa_crime_only = False
 moa_from_alert = st.session_state.get("moa_search_source") == "alert"
 
-if selected_kw:
+if selected_kw and moa_from_alert:
+    # 주의보 기사는 예방 포인트 아래에서 이미 표시
+    display_kw = st.session_state.get("moa_alert_display_kw") or selected_kw
+    st.info(
+        f"주의보 「{display_kw}」 관련 기사는 위 **예방 포인트 아래**에서 확인할 수 있습니다."
+    )
+    st.session_state.pop("moa_from_alert_nav", None)
+elif selected_kw:
     moa_crime_only = st.checkbox(
         "범죄기사",
         value=False,
         key="moa_crime_only",
         help=(
-            "체크 시 제목 기준으로 "
-            "① 검거·송치·구속·체포·적발·기소·피의자·일당 등 수사·사법 표현, 또는 "
-            "② 편취·수법·기승 등 + 일당·속아·억원 등 사건 신호가 함께 있는 기사만 표시합니다."
+            "제목에 수사·사법 표현이 있거나, "
+            "범행 표현과 사건 신호가 함께 있는 기사만 남깁니다."
         ),
     )
-    if moa_from_alert:
-        # 주의보 N회 집계에 쓰인 기사만 (API 재검색 없음)
-        moa_articles = filter_articles_by_alert_keyword(alert_news, selected_kw)
-    else:
-        with st.spinner(f"「{selected_kw}」 관련 기사 불러오는 중…"):
-            moa_articles, moa_error = fetch_moa_keyword_news(
-                client_id, client_secret, selected_kw
-            )
+    if moa_crime_only:
+        st.caption(
+            "제목 기준 필터 — "
+            "① 검거·송치·구속·체포·적발·기소·재판·선고·피의자·일당 등 "
+            "수사·사법 표현이 있는 기사, 또는 "
+            "② 편취·수법·기승·급증 등과 "
+            "일당·속아·억원·피해액 등 사건 신호가 **함께** 있는 기사만 표시합니다."
+        )
+    with st.spinner(f"「{selected_kw}」 관련 기사 불러오는 중…"):
+        moa_articles, moa_error = fetch_moa_keyword_news(
+            client_id, client_secret, selected_kw
+        )
 
 if moa_crime_only and moa_articles:
     moa_articles = [
@@ -3467,29 +3879,16 @@ if moa_crime_only and moa_articles:
         )
     ]
 
-if selected_kw:
+if selected_kw and not moa_from_alert:
     if moa_error:
         st.error(moa_error)
     elif moa_articles:
         filter_note = " · 범죄기사" if moa_crime_only else ""
-        if moa_from_alert:
-            display_kw = st.session_state.get("moa_alert_display_kw") or selected_kw
-            st.markdown(
-                f'<p class="phishing-moa-card-label">🚨 주의보 「{html.escape(display_kw)}」 '
-                f"집계 기사 {len(moa_articles)}건{filter_note}</p>",
-                unsafe_allow_html=True,
-            )
-            if not moa_crime_only:
-                st.caption(
-                    f"주의보 「{display_kw}」 {len(moa_articles)}회 언급과 같은 기사입니다."
-                )
-            st.session_state.pop("moa_from_alert_nav", None)
-        else:
-            st.markdown(
-                f'<p class="phishing-moa-card-label">「{html.escape(selected_kw)}」 최신 기사 '
-                f"{len(moa_articles)}건{filter_note}</p>",
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f'<p class="phishing-moa-card-label">「{html.escape(selected_kw)}」 최신 기사 '
+            f"{len(moa_articles)}건{filter_note}</p>",
+            unsafe_allow_html=True,
+        )
         visible = moa_articles[: st.session_state.moa_display_count]
         render_naver_api_attribution()
         for idx, news in enumerate(visible, 1):
