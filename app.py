@@ -489,9 +489,12 @@ st.markdown(
       font-size: 0.95rem;
       font-weight: 700;
       color: #065f46;
-      margin: 0.15rem 0 0.65rem;
+      margin: 0.15rem 0 0.15rem;
       padding-left: 0.15rem;
       border-left: 4px solid #10b981;
+    }
+    .phishing-moa-label-row {
+      margin: 0;
     }
     .phishing-moa-picker-hint {
       font-size: 0.88rem;
@@ -1102,7 +1105,7 @@ def render_phishing_alert_block(alert: dict) -> None:
 
     st.markdown(
         f"""
-        <div class="phishing-alert-hero">
+        <div class="phishing-alert-hero" id="alert-stay-anchor">
           <div class="phishing-alert-badge">
             <span class="phishing-alert-pulse"></span>
             🚨 피싱 주의보 · LIVE
@@ -1116,6 +1119,7 @@ def render_phishing_alert_block(alert: dict) -> None:
           </div>
         </div>
         {how_section}
+        <div id="alert-after-prevention"></div>
         """,
         unsafe_allow_html=True,
     )
@@ -1132,7 +1136,7 @@ def render_backseo_section_header(article_count: int) -> None:
     )
     st.markdown(
         f"""
-        <div class="phishing-backseo-hero">
+        <div class="phishing-backseo-hero" id="method-stay-anchor">
           <div class="phishing-backseo-badge">
             <span class="phishing-backseo-pulse"></span>
             📋 수법 분석 및 예방
@@ -1173,7 +1177,7 @@ def render_moa_section_header() -> None:
     """Da Moa 섹션 헤더."""
     st.markdown(
         """
-        <div class="phishing-moa-hero">
+        <div class="phishing-moa-hero" id="moa-stay-anchor">
           <div class="phishing-moa-badge">
             <span class="phishing-moa-pulse"></span>
             🔍 키워드별 최신 기사
@@ -2614,8 +2618,155 @@ def resolve_moa_search_keyword(alert_keyword: str) -> str:
     return map_alert_keyword_to_moa(alert_keyword) or alert_keyword
 
 
+def scroll_to_dom_id(
+    element_id: str,
+    *,
+    block: str = "start",
+    delay_ms: int = 80,
+    retries: tuple[int, ...] = (0, 200),
+    fallback_selector: str | None = None,
+) -> None:
+    """리런 후 스크롤 위치 복원.
+
+    휠·터치 등 사용자 스크롤이 감지되면 즉시 중단해 튕김을 막습니다.
+    """
+    delays = [delay_ms + r for r in retries]
+    # nonce로 iframe 스크립트가 매번 다시 실행되도록 함
+    nonce = f"{datetime.now().timestamp()}-{id(element_id)}"
+    components.html(
+        "<script>"
+        "(function(){"
+        f"const _nonce={json.dumps(nonce)};"
+        f"const id={json.dumps(element_id)};"
+        f"const block={json.dumps(block)};"
+        f"const delays={json.dumps(delays)};"
+        f"const fallback={json.dumps(fallback_selector)};"
+        "const d=window.parent.document;"
+        "const w=window.parent;"
+        "let cancelled=false;"
+        "const timers=[];"
+        "function cleanup(){"
+        "['wheel','touchmove','pointerdown','keydown'].forEach(function(ev){"
+        "w.removeEventListener(ev, onUser, true);"
+        "d.removeEventListener(ev, onUser, true);"
+        "});"
+        "}"
+        "function onUser(){"
+        "if(cancelled) return;"
+        "cancelled=true;"
+        "timers.forEach(function(t){clearTimeout(t);});"
+        "timers.length=0;"
+        "cleanup();"
+        "}"
+        "['wheel','touchmove','pointerdown','keydown'].forEach(function(ev){"
+        "w.addEventListener(ev, onUser, {capture:true, passive:true});"
+        "d.addEventListener(ev, onUser, {capture:true, passive:true});"
+        "});"
+        "function findEl(){"
+        "return d.getElementById(id)"
+        "|| (fallback ? d.querySelector(fallback) : null);"
+        "}"
+        "function scrollParents(el){"
+        "let n=el.parentElement;"
+        "while(n){"
+        "const st=w.getComputedStyle(n);"
+        "const oy=st.overflowY;"
+        "if((oy==='auto'||oy==='scroll'||oy==='overlay') && n.scrollHeight>n.clientHeight+8){"
+        "const top=el.getBoundingClientRect().top"
+        "-n.getBoundingClientRect().top + n.scrollTop - 16;"
+        "n.scrollTop=Math.max(0,top);"
+        "}"
+        "n=n.parentElement;"
+        "}"
+        "}"
+        "function go(){"
+        "if(cancelled) return;"
+        "const el=findEl();"
+        "if(!el) return;"
+        "try{el.scrollIntoView({behavior:'instant',block:block});}catch(e){}"
+        "scrollParents(el);"
+        "const mains=["
+        "d.querySelector('[data-testid=\"stMain\"]'),"
+        "d.querySelector('section.main'),"
+        "d.querySelector('[data-testid=\"stAppViewContainer\"]')"
+        "];"
+        "mains.forEach(function(main){"
+        "if(!main) return;"
+        "const top=el.getBoundingClientRect().top"
+        "-main.getBoundingClientRect().top + (main.scrollTop||0) - 16;"
+        "try{main.scrollTop=Math.max(0,top);}catch(e){}"
+        "});"
+        "}"
+        "delays.forEach(function(t){timers.push(setTimeout(go, t));});"
+        "timers.push(setTimeout(function(){"
+        "cancelled=true; cleanup();"
+        "}, Math.max.apply(null, delays.concat([0])) + 80));"
+        "})();"
+        "</script>",
+        height=0,
+    )
+
+
+# 짧게만 맞춤 — 길게 반복하면 휠 스크롤과 충돌해 튕김
+_SECTION_SCROLL_RETRIES = (0, 60, 180)
+_MORE_SCROLL_RETRIES = (0, 60, 160)
+
+
+def scroll_to_alert_screen() -> None:
+    """주의보(키워드·예방 포인트) 화면으로 스크롤."""
+    scroll_to_dom_id(
+        "alert-stay-anchor",
+        block="start",
+        delay_ms=0,
+        retries=_SECTION_SCROLL_RETRIES,
+        fallback_selector=".phishing-alert-hero",
+    )
+
+
+def scroll_to_method_screen() -> None:
+    """피싱 수법 Da Moa 화면으로 스크롤."""
+    scroll_to_dom_id(
+        "method-stay-anchor",
+        block="start",
+        delay_ms=0,
+        retries=_SECTION_SCROLL_RETRIES,
+        fallback_selector=".phishing-backseo-hero",
+    )
+
+
+def scroll_to_moa_screen() -> None:
+    """키워드(최신 피싱 기사 Da Moa) 화면으로 스크롤."""
+    scroll_to_dom_id(
+        "moa-stay-anchor",
+        block="start",
+        delay_ms=0,
+        retries=_SECTION_SCROLL_RETRIES,
+        fallback_selector=".phishing-moa-hero",
+    )
+
+
+def close_alert_inline_list() -> None:
+    """주의보 기사 목록만 닫고 주의보 화면으로 복귀."""
+    clear_moa_keyword_selection()
+    st.session_state.scroll_stay_alert_close = True
+
+
+def close_method_article_list() -> None:
+    """수법 기사 목록 닫고 피싱 수법 화면으로 복귀."""
+    st.session_state.method_list_closed = True
+    st.session_state.pop("method_list_close_cb", None)
+    st.session_state.scroll_stay_method_close = True
+
+
+def close_moa_keyword_list() -> None:
+    """키워드 기사 목록 닫고 키워드 Da Moa 화면으로 복귀."""
+    clear_moa_keyword_selection()
+    st.session_state.scroll_stay_moa_close = True
+
+
 def clear_moa_keyword_selection() -> None:
-    """키워드 선택(X)·닫기 시 주의보·검색 상태까지 함께 비웁니다."""
+    """키워드 선택(X)·직접 검색(X)·닫기 시 주의보·검색 상태까지 함께 비웁니다."""
+    prev_kw = st.session_state.get("moa_active_keyword")
     st.session_state.pop("moa_active_keyword", None)
     st.session_state.pop("moa_search_source", None)
     st.session_state.pop("moa_from_alert_nav", None)
@@ -2623,10 +2774,17 @@ def clear_moa_keyword_selection() -> None:
     st.session_state.pop("moa_alert_bound_to_picker", None)
     st.session_state.pop("alert_inline_close_cb", None)
     st.session_state.pop("moa_list_close_cb", None)
-    # selectbox 위젯이 이미 만들어진 뒤에는 key를 직접 수정할 수 없음 → 다음 실행에서 비움
+    st.session_state.pop("moa_crime_only", None)
+    if prev_kw:
+        discard_widget_key(_moa_more_button_key(str(prev_kw)))
+    discard_widget_key(st.session_state.pop("moa_more_key_last", None))
+    # selectbox/입력 위젯이 이미 만들어진 뒤에는 key를 직접 수정할 수 없음 → 다음 실행에서 비움
     st.session_state.moa_pending_clear_picker = True
+    st.session_state.moa_pending_clear_custom_input = True
+    st.session_state.moa_pending_clear_custom_chip = True
     st.session_state.moa_last_picked = None
     st.session_state.moa_display_count = 5
+    st.session_state.pop("scroll_to_moa_articles", None)
     # URL에 ?alert_moa= 가 남아 다시 켜지지 않도록 nonce 갱신
     st.session_state.moa_alert_link_nonce = (
         int(st.session_state.get("moa_alert_link_nonce") or 1) + 1
@@ -2643,36 +2801,46 @@ def clear_moa_keyword_selection() -> None:
             pass
 
 
-def sync_alert_picker_clear() -> bool:
-    """키워드 selectbox가 X로 비워졌으면 주의보 기사 상태도 제거. True면 Cleared."""
-    if st.session_state.get("moa_search_source") != "alert":
-        return False
-    if not st.session_state.get("moa_alert_bound_to_picker"):
-        return False
-    # 위젯 값이 이미 None이면 사용자가 X로 해제한 것
-    if st.session_state.get("moa_keyword_picker"):
-        return False
-    clear_moa_keyword_selection()
-    return True
+def on_moa_custom_chip_change() -> None:
+    """직접 검색어 selectbox의 X — 검색어·기사 목록 삭제."""
+    if st.session_state.get("moa_custom_chip") is None:
+        clear_moa_keyword_selection()
+        st.session_state.scroll_stay_moa_close = True
+
+
+def on_moa_crime_only_change() -> None:
+    """범죄기사 필터 토글 시 목록을 처음부터 다시 보여 줌."""
+    st.session_state.moa_display_count = 5
 
 
 def on_moa_keyword_picker_change() -> None:
     """selectbox 변경/X 해제."""
     picked = st.session_state.get("moa_keyword_picker")
     st.session_state.moa_display_count = 5
+    st.session_state.pop("moa_crime_only", None)
     if picked is None:
         if st.session_state.get("moa_search_source") == "custom":
             st.session_state.moa_last_picked = None
             return
+        # 주의보(alert) 목록은 더보기 리런 때 picker가 비는 경우가 있어
+        # 여기서 닫지 않음 — 목록 닫기는 「닫기」체크만 사용
+        if st.session_state.get("moa_search_source") == "alert":
+            st.session_state.moa_last_picked = None
+            return
         clear_moa_keyword_selection()
         return
+    prev_kw = st.session_state.get("moa_active_keyword")
+    if prev_kw and prev_kw != picked:
+        discard_widget_key(_moa_more_button_key(str(prev_kw)))
     st.session_state.moa_last_picked = picked
     st.session_state.moa_active_keyword = picked
     st.session_state.moa_search_source = "picker"
     st.session_state.pop("moa_from_alert_nav", None)
     st.session_state.pop("moa_alert_display_kw", None)
     st.session_state.pop("moa_alert_bound_to_picker", None)
-    st.session_state.moa_custom_input = ""
+    st.session_state.moa_pending_clear_custom_input = True
+    st.session_state.moa_pending_clear_custom_chip = True
+    st.session_state.scroll_to_moa_articles = True
 
 
 def trigger_moa_from_alert(alert_keyword: str) -> None:
@@ -2694,6 +2862,17 @@ def trigger_moa_from_alert(alert_keyword: str) -> None:
     st.session_state.moa_custom_input = ""
 
 
+def _moa_more_button_key(keyword: str) -> str:
+    return "moa_more_" + re.sub(r"\W+", "_", keyword or "kw")
+
+
+def discard_widget_key(*keys: str | None) -> None:
+    """렌더하지 않을 위젯 key를 미리 제거 (Streamlit orphan key 오류 방지)."""
+    for key in keys:
+        if key:
+            st.session_state.pop(key, None)
+
+
 def render_more_with_close(
     *,
     more_label: str | None,
@@ -2701,19 +2880,31 @@ def render_more_with_close(
     close_key: str,
     done_caption: str | None = None,
 ) -> str | None:
-    """더보기 옆에 닫기(체크박스) — 'more' | 'close' | None."""
+    """더보기 옆에 닫기(체크박스) — 'more' | 'close' | None.
+
+    더보기 클릭 시 닫기 체크가 남아 있어도 more를 우선한다.
+    """
+    # 직전 더보기 직후 닫기 체크 잔상 제거 (위젯 생성 전)
+    if st.session_state.pop(f"_clear_{close_key}", False):
+        st.session_state.pop(close_key, None)
+
     left, right = st.columns([4, 1])
-    action: str | None = None
+    more_clicked = False
     with left:
         if more_label and more_key:
-            if st.button(more_label, key=more_key, use_container_width=True):
-                action = "more"
+            more_clicked = st.button(
+                more_label, key=more_key, use_container_width=True
+            )
         elif done_caption:
             st.caption(done_caption)
     with right:
-        if st.checkbox("닫기", value=False, key=close_key):
-            action = "close"
-    return action
+        close_checked = st.checkbox("닫기", key=close_key)
+
+    if more_clicked:
+        return "more"
+    if close_checked:
+        return "close"
+    return None
 
 
 def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
@@ -2728,16 +2919,21 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
 
     if not articles:
         st.info(f"「{keyword}」 주의 키워드 기사 목록에 포함된 기사가 없습니다.")
-        if st.checkbox("닫기", value=False, key="alert_inline_close_cb"):
-            clear_moa_keyword_selection()
+        if st.session_state.pop("_clear_alert_inline_close_cb", False):
+            st.session_state.pop("alert_inline_close_cb", None)
+        if st.checkbox("닫기", key="alert_inline_close_cb"):
+            close_alert_inline_list()
             st.rerun()
         return
 
     st.caption(f"주의 키워드 「{keyword}」 {len(articles)}회 언급과 같은 기사입니다.")
     render_naver_api_attribution()
 
+    focus_idx = st.session_state.pop("scroll_to_alert_article", None)
     visible = articles[: st.session_state.moa_display_count]
     for idx, news in enumerate(visible, 1):
+        if focus_idx is not None and idx == focus_idx:
+            st.markdown('<div id="alert-article-focus"></div>', unsafe_allow_html=True)
         kw_label = (
             " · ".join(news["keywords"])
             if news.get("keywords")
@@ -2751,6 +2947,14 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
             if news.get("description"):
                 snippet = news["description"]
                 st.write(snippet[:160] + ("…" if len(snippet) > 160 else ""))
+
+    if focus_idx is not None:
+        scroll_to_dom_id(
+            "alert-article-focus",
+            block="start",
+            delay_ms=0,
+            retries=_MORE_SCROLL_RETRIES,
+        )
 
     remaining = len(articles) - st.session_state.moa_display_count
     if remaining > 0:
@@ -2769,10 +2973,17 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
         )
 
     if action == "more":
-        st.session_state.moa_display_count += 10
+        # 클릭 시점(=직전까지 보던 다음 기사)에 머물도록
+        prev_count = st.session_state.moa_display_count
+        st.session_state.moa_display_count = prev_count + 10
+        st.session_state.scroll_to_alert_article = prev_count + 1
+        st.session_state.moa_search_source = "alert"
+        if st.session_state.get("moa_alert_display_kw"):
+            st.session_state.moa_active_keyword = st.session_state.moa_alert_display_kw
+        st.session_state["_clear_alert_inline_close_cb"] = True
         st.rerun()
     elif action == "close":
-        clear_moa_keyword_selection()
+        close_alert_inline_list()
         st.rerun()
 
 
@@ -3158,10 +3369,88 @@ def article_counts_toward_alert_keyword(news: dict, keyword: str) -> bool:
     return False
 
 
+# 주의 키워드 목록 — 광고·홍보성 문구 (뒤로 보냄)
+ALERT_LIST_AD_PROMO_WORDS = (
+    "광고",
+    "유료광고",
+    "광고문의",
+    "협찬",
+    "스폰서",
+    "프로모션",
+    "이벤트",
+    "할인",
+    "특가",
+    "체험단",
+    "원고료",
+    "제공=",
+    "제공 =",
+    "홍보",
+    "캠페인",
+    "설명회",
+    "간담회",
+    "예방교육",
+    "예방 교육",
+)
+
+
+def alert_article_priority_score(article: dict) -> int:
+    """주의 키워드 목록 정렬 — 수법·행위·피해 사례를 광고·홍보보다 앞에."""
+    title = (article.get("title") or "").strip()
+    description = article.get("description") or ""
+    link = article.get("link") or ""
+    combined = f"{title} {description}"
+    score = 0
+
+    # 피해·수법·수사·행위 신호 (높을수록 앞)
+    if has_confirmed_victim_evidence(combined):
+        score += 45
+    if has_crime_case_narrative(combined):
+        score += 35
+    if is_moa_crime_only_article(title, description):
+        score += 30
+    if any(w in combined for w in ("수법", "범행", "사칭", "편취", "갈취", "탈취")):
+        score += 18
+    if any(
+        w in combined
+        for w in ("피해자", "피해액", "피해금", "억원", "송금", "이체", "인출")
+    ):
+        score += 14
+    score += min(count_substance_hits(combined), 8) * 3
+    if qualifies_as_case_or_surge_report(combined):
+        score += 10
+
+    analysis = article.get("analysis") or {}
+    tactics = analysis.get("tactics") or article.get("tactics") or []
+    if tactics:
+        score += min(len(tactics), 5) * 5
+    keywords = article.get("keywords") or analysis.get("keywords") or []
+    if keywords:
+        score += min(len(keywords), 4) * 2
+
+    # 광고·홍보·예방 안내성 (낮을수록 뒤)
+    if any(w in combined for w in ALERT_LIST_AD_PROMO_WORDS):
+        score -= 55
+    if has_promo_activity_context(combined) or is_promo_title_article(
+        title, description
+    ):
+        score -= 40
+    if is_prevention_advice_article(title, description):
+        score -= 35
+    if is_police_station_promo_article(title, description):
+        score -= 30
+    if is_alert_promo_excluded_article(title, description, link):
+        score -= 25
+
+    return score
+
+
 def filter_articles_by_alert_keyword(
     articles: list[dict], keyword: str
 ) -> list[dict]:
-    """주의보 N회 집계에 실제로 포함된 기사만 반환."""
+    """주의보 N회 집계에 실제로 포함된 기사만 반환.
+
+    수법·행위·피해 사례를 광고·홍보성 기사보다 앞에 둡니다.
+    """
     kw = (keyword or "").strip()
     if not kw:
         return []
@@ -3170,7 +3459,13 @@ def filter_articles_by_alert_keyword(
         for article in articles
         if article_counts_toward_alert_keyword(article, kw)
     ]
-    matched.sort(key=lambda x: x.get("datetime") or datetime.min, reverse=True)
+    matched.sort(
+        key=lambda x: (
+            alert_article_priority_score(x),
+            x.get("datetime") or datetime.min,
+        ),
+        reverse=True,
+    )
     return dedupe_articles_by_title(matched)
 
 
@@ -3631,9 +3926,6 @@ if _alert_moa_q:
             except Exception:
                 pass
 
-# 키워드 선택 X로 picker가 비워진 경우 — 예방 포인트 아래 기사보다 먼저 정리
-sync_alert_picker_clear()
-
 # ---------------------------------------------------------------------------
 # 홈 화면: 긴급 주의보
 # ---------------------------------------------------------------------------
@@ -3676,15 +3968,7 @@ if st.session_state.get("moa_search_source") == "alert":
         render_alert_inline_articles(_alert_arts, _alert_kw)
 
 if st.session_state.pop("scroll_to_alert_news", False):
-    components.html(
-        "<script>"
-        "(function(){const d=window.parent.document;"
-        "const el=d.getElementById('alert-news-section');"
-        "if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}"
-        "})();"
-        "</script>",
-        height=0,
-    )
+    scroll_to_dom_id("alert-news-section", block="start", delay_ms=60)
 
 st.divider()
 
@@ -3710,9 +3994,14 @@ if news_list:
             st.session_state.pop("method_list_close_cb", None)
             st.rerun()
     else:
+        focus_method_idx = st.session_state.pop("scroll_to_method_article", None)
         current_visible_news = news_list[: st.session_state.display_count]
 
         for idx, news in enumerate(current_visible_news, 1):
+            if focus_method_idx is not None and idx == focus_method_idx:
+                st.markdown(
+                    '<div id="method-article-focus"></div>', unsafe_allow_html=True
+                )
             analysis = news["analysis"]
             with st.container(border=True):
                 st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
@@ -3731,6 +4020,14 @@ if news_list:
 
                 render_app_analysis_block(analysis)
 
+        if focus_method_idx is not None:
+            scroll_to_dom_id(
+                "method-article-focus",
+                block="start",
+                delay_ms=0,
+                retries=_MORE_SCROLL_RETRIES,
+            )
+
         remaining = len(news_list) - st.session_state.display_count
         if remaining > 0:
             add_count = min(10, remaining)
@@ -3747,11 +4044,13 @@ if news_list:
                 done_caption=f"수법 중심 기사 {len(news_list)}건을 모두 표시했습니다.",
             )
         if method_action == "more":
-            st.session_state.display_count += 10
+            prev_count = st.session_state.display_count
+            st.session_state.display_count = prev_count + 10
+            st.session_state.scroll_to_method_article = prev_count + 1
+            st.session_state["_clear_method_list_close_cb"] = True
             st.rerun()
         elif method_action == "close":
-            st.session_state.method_list_closed = True
-            st.session_state.pop("method_list_close_cb", None)
+            close_method_article_list()
             st.rerun()
 else:
     st.info("수법·사건 조건에 맞는 뉴스 기사가 없습니다.")
@@ -3762,14 +4061,12 @@ st.divider()
 # 파트 2: Da Moa — 키워드 선택 시 1회 검색
 # ---------------------------------------------------------------------------
 if st.session_state.pop("scroll_to_moa", False):
-    components.html(
-        "<script>"
-        "(function(){const d=window.parent.document;"
-        "const el=d.getElementById('moa-section');"
-        "if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}"
-        "})();"
-        "</script>",
-        height=0,
+    scroll_to_dom_id(
+        "moa-section",
+        block="start",
+        delay_ms=0,
+        retries=_SECTION_SCROLL_RETRIES,
+        fallback_selector=".phishing-moa-hero",
     )
 
 st.markdown('<div id="moa-section"></div>', unsafe_allow_html=True)
@@ -3783,13 +4080,30 @@ if _pending_custom:
     st.session_state.moa_display_count = 5
     st.session_state.moa_last_picked = None
     st.session_state.moa_keyword_picker = None
+    st.session_state.moa_custom_chip = _pending_custom
+    st.session_state.moa_custom_input = _pending_custom
     st.session_state.pop("moa_from_alert_nav", None)
     st.session_state.pop("moa_alert_display_kw", None)
     st.session_state.pop("moa_pending_clear_picker", None)
+    st.session_state.pop("moa_pending_clear_custom_chip", None)
+    st.session_state.scroll_to_moa_articles = True
 
 if st.session_state.pop("moa_pending_clear_picker", False):
     st.session_state.moa_keyword_picker = None
     st.session_state.moa_last_picked = None
+
+if st.session_state.pop("moa_pending_clear_custom_input", False):
+    st.session_state.moa_custom_input = ""
+
+if st.session_state.pop("moa_pending_clear_custom_chip", False):
+    st.session_state.pop("moa_custom_chip", None)
+
+# 주의보 목록이 열린 동안에는 더보기 리런으로 picker가 비어도 복구
+if st.session_state.get("moa_search_source") == "alert":
+    _restore_kw = st.session_state.get("moa_alert_display_kw")
+    if _restore_kw and _restore_kw in MOA_KEYWORDS:
+        st.session_state.moa_keyword_picker = _restore_kw
+        st.session_state.moa_last_picked = _restore_kw
 
 st.markdown(
     '<div id="moa-keyword-picker-section"></div>'
@@ -3811,40 +4125,51 @@ picked = st.selectbox(
     on_change=on_moa_keyword_picker_change,
 )
 
-# X로 비운 뒤에도 주의보 상태가 남아 있으면 한 번 더 정리 후 새로고침
-if (
-    picked is None
-    and st.session_state.get("moa_search_source") == "alert"
-    and st.session_state.get("moa_alert_bound_to_picker")
-):
-    clear_moa_keyword_selection()
-    st.rerun()
-
 st.markdown(
     '<p class="phishing-moa-picker-hint">🔎 또는 검색어를 직접 입력해 주세요</p>',
     unsafe_allow_html=True,
 )
-# form + Enter 제출 — 입력칸 위 / 검색 버튼 아래 (모바일 잘림 없음)
-with st.form("moa_custom_search_form", clear_on_submit=False, border=False):
-    st.text_input(
-        "직접 검색",
-        placeholder="예: 노쇼, 대포통장 등",
-        label_visibility="collapsed",
-        key="moa_custom_input",
-        max_chars=40,
-    )
-    moa_custom_clicked = st.form_submit_button(
-        "🔍 검색",
-        use_container_width=True,
-    )
 
-if moa_custom_clicked:
-    custom_q = (st.session_state.get("moa_custom_input") or "").strip()
-    if len(custom_q) < 2:
-        st.warning("검색어는 2자 이상 입력해 주세요.")
-    else:
-        st.session_state.moa_pending_custom = custom_q
-        st.rerun()
+# 검색 완료 후 — 키워드 selectbox와 동일하게 창 안쪽 X로 지우기
+_custom_active_q = (
+    st.session_state.get("moa_active_keyword")
+    if st.session_state.get("moa_search_source") == "custom"
+    else None
+)
+if _custom_active_q:
+    # index=None + placeholder → 선택창 내부에 clear(X) 표시
+    st.session_state.moa_custom_chip = _custom_active_q
+    st.selectbox(
+        "직접 검색어",
+        options=[_custom_active_q],
+        index=None,
+        placeholder="검색어",
+        label_visibility="collapsed",
+        key="moa_custom_chip",
+        on_change=on_moa_custom_chip_change,
+    )
+else:
+    # form + Enter 제출 — 입력칸 위 / 검색 버튼 아래 (모바일 잘림 없음)
+    with st.form("moa_custom_search_form", clear_on_submit=False, border=False):
+        st.text_input(
+            "직접 검색",
+            placeholder="예: 노쇼, 대포통장 등",
+            label_visibility="collapsed",
+            key="moa_custom_input",
+            max_chars=40,
+        )
+        moa_custom_clicked = st.form_submit_button(
+            "🔍 검색",
+            use_container_width=True,
+        )
+
+    if moa_custom_clicked:
+        custom_q = (st.session_state.get("moa_custom_input") or "").strip()
+        if len(custom_q) < 2:
+            st.warning("검색어는 2자 이상 입력해 주세요.")
+        else:
+            st.session_state.moa_pending_custom = custom_q
+            st.rerun()
 
 selected_kw = st.session_state.get("moa_active_keyword") or picked
 moa_articles: list[dict] = []
@@ -3859,98 +4184,155 @@ if selected_kw and moa_from_alert:
         f"주의 키워드 「{display_kw}」 기사 목록은 위 **예방 포인트 아래**에서 확인할 수 있습니다."
     )
     st.session_state.pop("moa_from_alert_nav", None)
+    st.session_state.pop("moa_crime_only", None)
 elif selected_kw:
-    moa_crime_only = st.checkbox(
-        "범죄기사",
-        value=False,
-        key="moa_crime_only",
-        help=(
-            "제목에 수사·사법 표현이 있거나, "
-            "범행 표현과 사건 신호가 함께 있는 기사만 남깁니다."
-        ),
-    )
-    if moa_crime_only:
-        st.caption(
-            "제목 기준 필터 — "
-            "① 검거·송치·구속·체포·적발·기소·재판·선고·피의자·일당 등 "
-            "수사·사법 표현이 있는 기사, 또는 "
-            "② 편취·수법·기승·급증 등과 "
-            "일당·속아·억원·피해액 등 사건 신호가 **함께** 있는 기사만 표시합니다."
-        )
     with st.spinner(f"「{selected_kw}」 관련 기사 불러오는 중…"):
         moa_articles, moa_error = fetch_moa_keyword_news(
             client_id, client_secret, selected_kw
         )
+    # 체크박스 렌더 전 — 직전 선택값으로 건수·필터 반영
+    moa_crime_only = bool(st.session_state.get("moa_crime_only", False))
+else:
+    # 키워드 없을 때 범죄기사 체크 상태가 남아 orphan 오류 나지 않게 정리
+    st.session_state.pop("moa_crime_only", None)
 
 if moa_crime_only and moa_articles:
     moa_articles = [
         article
         for article in moa_articles
         if is_moa_crime_only_article(
-            article["title"],
+            article.get("title") or "",
             article.get("description", ""),
             article.get("keywords"),
         )
     ]
 
 if selected_kw and not moa_from_alert:
+    moa_more_key = _moa_more_button_key(selected_kw)
+    st.session_state.moa_more_key_last = moa_more_key
+    st.markdown('<div id="moa-articles-section"></div>', unsafe_allow_html=True)
     if moa_error:
         st.error(moa_error)
-    elif moa_articles:
-        filter_note = " · 범죄기사" if moa_crime_only else ""
-        st.markdown(
-            f'<p class="phishing-moa-card-label">「{html.escape(selected_kw)}」 최신 기사 '
-            f"{len(moa_articles)}건{filter_note}</p>",
-            unsafe_allow_html=True,
+        discard_widget_key(moa_more_key)
+        st.session_state.pop("moa_crime_only", None)
+    else:
+        # 「최신 기사 N건」 바로 옆에 범죄기사 체크 (오른쪽 여백으로 붙임)
+        label_col, crime_col, _pad = st.columns(
+            [3.1, 1.15, 3.2], vertical_alignment="center"
         )
-        visible = moa_articles[: st.session_state.moa_display_count]
-        render_naver_api_attribution()
-        for idx, news in enumerate(visible, 1):
-            kw_label = (
-                " · ".join(news["keywords"])
-                if news["keywords"]
-                else news["analysis"]["primary"]
+        with label_col:
+            st.markdown(
+                f'<div class="phishing-moa-label-row">'
+                f'<p class="phishing-moa-card-label">「{html.escape(str(selected_kw))}」 최신 기사 '
+                f"{len(moa_articles)}건</p></div>",
+                unsafe_allow_html=True,
             )
-            with st.container(border=True):
-                st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
-                st.caption(
-                    f"📢 {news['press']} | 🗓️ {news['date']} | 🏷️ {kw_label}"
-                )
-                if news.get("description"):
-                    snippet = news["description"]
-                    st.write(snippet[:160] + ("…" if len(snippet) > 160 else ""))
+        with crime_col:
+            moa_crime_only = st.checkbox(
+                "범죄기사",
+                key="moa_crime_only",
+                help=(
+                    "제목에 수사·사법 표현이 있거나, "
+                    "범행 표현과 사건 신호가 함께 있는 기사만 남깁니다."
+                ),
+                on_change=on_moa_crime_only_change,
+            )
+        if moa_crime_only:
+            st.caption(
+                "제목 기준 필터 — "
+                "① 검거·송치·구속·체포·적발·기소·재판·선고·피의자·일당 등 "
+                "수사·사법 표현이 있는 기사, 또는 "
+                "② 편취·수법·기승·급증 등과 "
+                "일당·속아·억원·피해액 등 사건 신호가 **함께** 있는 기사만 표시합니다."
+            )
 
-        remaining_moa = len(moa_articles) - st.session_state.moa_display_count
-        if remaining_moa > 0:
-            add_count = min(10, remaining_moa)
-            moa_action = render_more_with_close(
-                more_label=f"🔽 「{selected_kw}」 더보기 ({add_count}개 추가)",
-                more_key="moa_more_" + re.sub(r"\W+", "_", selected_kw),
-                close_key="moa_list_close_cb",
-            )
+        if moa_articles:
+            focus_moa_idx = st.session_state.pop("scroll_to_moa_article", None)
+            visible = moa_articles[: st.session_state.moa_display_count]
+            render_naver_api_attribution()
+            for idx, news in enumerate(visible, 1):
+                if focus_moa_idx is not None and idx == focus_moa_idx:
+                    st.markdown(
+                        '<div id="moa-article-focus"></div>', unsafe_allow_html=True
+                    )
+                keywords = news.get("keywords") or []
+                analysis = news.get("analysis") or {}
+                kw_label = (
+                    " · ".join(keywords)
+                    if keywords
+                    else (analysis.get("primary") or selected_kw)
+                )
+                with st.container(border=True):
+                    st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
+                    st.caption(
+                        f"📢 {news['press']} | 🗓️ {news['date']} | 🏷️ {kw_label}"
+                    )
+                    if news.get("description"):
+                        snippet = news["description"]
+                        st.write(snippet[:160] + ("…" if len(snippet) > 160 else ""))
+
+            if focus_moa_idx is not None:
+                scroll_to_dom_id(
+                    "moa-article-focus",
+                    block="start",
+                    delay_ms=0,
+                    retries=_MORE_SCROLL_RETRIES,
+                )
+
+            remaining_moa = len(moa_articles) - st.session_state.moa_display_count
+            if remaining_moa > 0:
+                add_count = min(10, remaining_moa)
+                moa_action = render_more_with_close(
+                    more_label=f"🔽 「{selected_kw}」 더보기 ({add_count}개 추가)",
+                    more_key=moa_more_key,
+                    close_key="moa_list_close_cb",
+                )
+            else:
+                discard_widget_key(moa_more_key)
+                moa_action = render_more_with_close(
+                    more_label=None,
+                    more_key=None,
+                    close_key="moa_list_close_cb",
+                    done_caption=(
+                        f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다."
+                    ),
+                )
+            if moa_action == "more":
+                prev_count = st.session_state.moa_display_count
+                st.session_state.moa_display_count = prev_count + 10
+                st.session_state.scroll_to_moa_article = prev_count + 1
+                st.session_state["_clear_moa_list_close_cb"] = True
+                st.rerun()
+            elif moa_action == "close":
+                close_moa_keyword_list()
+                st.rerun()
         else:
+            if moa_crime_only:
+                st.info(
+                    f"「{selected_kw}」 관련 기사 중 범죄기사 조건에 맞는 기사가 없습니다."
+                )
+            else:
+                st.info(f"「{selected_kw}」 관련 기사가 없습니다.")
+            discard_widget_key(moa_more_key)
             moa_action = render_more_with_close(
                 more_label=None,
                 more_key=None,
                 close_key="moa_list_close_cb",
-                done_caption=(
-                    f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다."
-                ),
+                done_caption="목록을 닫으려면 오른쪽 닫기를 선택하세요.",
             )
-        if moa_action == "more":
-            st.session_state.moa_display_count += 10
-            st.rerun()
-        elif moa_action == "close":
-            clear_moa_keyword_selection()
-            st.rerun()
-    else:
-        if moa_crime_only:
-            st.info(f"「{selected_kw}」 관련 기사 중 범죄기사 조건에 맞는 기사가 없습니다.")
-        else:
-            st.info(f"「{selected_kw}」 관련 기사가 없습니다.")
-        if st.checkbox("닫기", value=False, key="moa_list_close_cb"):
-            clear_moa_keyword_selection()
-            st.rerun()
+            if moa_action == "close":
+                close_moa_keyword_list()
+                st.rerun()
+
+    # 키워드·직접 검색 직후 기사 목록으로 이동
+    if st.session_state.pop("scroll_to_moa_articles", False):
+        scroll_to_dom_id(
+            "moa-articles-section",
+            block="start",
+            delay_ms=0,
+            retries=_SECTION_SCROLL_RETRIES,
+            fallback_selector=".phishing-moa-card-label",
+        )
 
 st.caption(
     "본 서비스는 **민간 범죄 예방 안내용**이며, 수사기관·금융당국의 공식 경보·긴급 통보를 "
@@ -3961,3 +4343,11 @@ st.caption(
     "기사 전문은 원문 링크를 통해 해당 언론사에서 열람해 주세요."
 )
 st.caption("무단 복제·전재·배포를 금지하며, 의심 정황은 **112** 또는 **1332**로 신고해 주세요.")
+
+# 닫기 후 각 섹션 화면으로 최종 복귀 (위젯 포커스보다 늦게)
+if st.session_state.pop("scroll_stay_alert_close", False):
+    scroll_to_alert_screen()
+if st.session_state.pop("scroll_stay_method_close", False):
+    scroll_to_method_screen()
+if st.session_state.pop("scroll_stay_moa_close", False):
+    scroll_to_moa_screen()
