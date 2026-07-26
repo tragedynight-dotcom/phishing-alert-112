@@ -2634,8 +2634,8 @@ def scroll_to_dom_id(
 
     offset_px만큼 위에 여백을 두어 제목(주의 키워드·최신 기사 등)이
     화면 밖으로 올라가지 않게 합니다.
-    모바일 탭 잔여 이벤트는 grace_ms 동안 무시하고,
-    이후 휠·터치이동이 있으면 자동 스크롤을 중단합니다.
+    모바일은 scrollIntoView + 여러 스크롤 부모에 동시 적용하고,
+    Streamlit 자체 스크롤 복원보다 늦게 재시도합니다.
     """
     delays = [delay_ms + r for r in retries]
     # nonce로 iframe 스크립트가 매번 다시 실행되도록 함
@@ -2659,9 +2659,17 @@ def scroll_to_dom_id(
         "d.removeEventListener(ev, onUser, true);"
         "});"
         "}"
-        "function onUser(){"
+        "function onUser(ev){"
         "if(cancelled) return;"
         "if(Date.now()<graceUntil) return;"
+        "if(ev && ev.type==='touchmove'){"
+        "const t=(ev.touches&&ev.touches[0])||null;"
+        "if(!t) return;"
+        "if(onUser._lx==null){onUser._lx=t.clientX;onUser._ly=t.clientY;return;}"
+        "const dx=Math.abs(t.clientX-onUser._lx);"
+        "const dy=Math.abs(t.clientY-onUser._ly);"
+        "if(dx<12 && dy<12) return;"
+        "}"
         "cancelled=true;"
         "timers.forEach(function(t){clearTimeout(t);});"
         "timers.length=0;"
@@ -2675,32 +2683,71 @@ def scroll_to_dom_id(
         "return d.getElementById(id)"
         "|| (fallback ? d.querySelector(fallback) : null);"
         "}"
+        "function isScrollable(node){"
+        "if(!node) return false;"
+        "try{"
+        "const s=w.getComputedStyle(node);"
+        "const oy=s.overflowY||'';"
+        "return (oy==='auto'||oy==='scroll'||oy==='overlay')"
+        "&& node.scrollHeight>node.clientHeight+4;"
+        "}catch(e){return false;}"
+        "}"
+        "function candidates(el){"
+        "const list=[];"
+        "let n=el?el.parentElement:null;"
+        "while(n && n!==d.documentElement){"
+        "if(isScrollable(n)) list.push(n);"
+        "n=n.parentElement;"
+        "}"
+        "["
+        "d.querySelector('[data-testid=\"stMain\"]'),"
+        "d.querySelector('section.main'),"
+        "d.querySelector('[data-testid=\"stAppViewContainer\"]'),"
+        "d.querySelector('.main'),"
+        "d.querySelector('.stApp'),"
+        "d.scrollingElement,"
+        "d.documentElement,"
+        "d.body"
+        "].forEach(function(m){ if(m && list.indexOf(m)<0) list.push(m); });"
+        "return list;"
+        "}"
+        "function apply(el){"
+        "try{el.scrollIntoView({behavior:'auto',block:'start'});}catch(e){"
+        "try{el.scrollIntoView(true);}catch(e2){}"
+        "}"
+        "candidates(el).forEach(function(main){"
+        "try{"
+        "const top=el.getBoundingClientRect().top"
+        "-main.getBoundingClientRect().top+(main.scrollTop||0)-offset;"
+        "main.scrollTop=Math.max(0,top);"
+        "if(typeof main.scrollTo==='function'){"
+        "main.scrollTo(0,Math.max(0,top));"
+        "}"
+        "}catch(e){}"
+        "});"
+        "try{"
+        "const y=el.getBoundingClientRect().top+(w.scrollY||0)-offset;"
+        "w.scrollTo(0,Math.max(0,y));"
+        "if(d.documentElement) d.documentElement.scrollTop=Math.max(0,y);"
+        "if(d.body) d.body.scrollTop=Math.max(0,y);"
+        "}catch(e){}"
+        "}"
         "function go(){"
         "if(cancelled) return;"
         "const el=findEl();"
         "if(!el) return;"
-        "const main=d.querySelector('[data-testid=\"stMain\"]')"
-        "|| d.querySelector('section.main')"
-        "|| d.querySelector('[data-testid=\"stAppViewContainer\"]')"
-        "|| d.scrollingElement;"
-        "if(main){"
-        "const top=el.getBoundingClientRect().top"
-        "-main.getBoundingClientRect().top + (main.scrollTop||0) - offset;"
-        "try{main.scrollTop=Math.max(0,top);}catch(e){}"
-        "return;"
-        "}"
+        "apply(el);"
         "try{"
-        "const y=el.getBoundingClientRect().top + (w.scrollY||0) - offset;"
-        "w.scrollTo(0, Math.max(0,y));"
+        "w.requestAnimationFrame(function(){ if(!cancelled) apply(el); });"
         "}catch(e){}"
         "}"
         "delays.forEach(function(t){timers.push(setTimeout(go, t));});"
         "timers.push(setTimeout(function(){"
         "cancelled=true; cleanup();"
-        "}, Math.max.apply(null, delays.concat([0])) + 120));"
+        "}, Math.max.apply(null, delays.concat([0])) + 200));"
         "})();"
         "</script>",
-        height=0,
+        height=1,
     )
 
 
@@ -2853,8 +2900,8 @@ def trigger_moa_from_alert(alert_keyword: str) -> None:
     st.session_state.moa_alert_bound_to_picker = False
     st.session_state.moa_display_count = 5
     st.session_state.moa_from_alert_nav = True
-    # query_params 삭제로 추가 리런이 나도 스크롤이 유지되도록 2회
-    st.session_state.scroll_to_alert_news = 2
+    # query_params 삭제·모바일 레이아웃 리런에도 스크롤 유지
+    st.session_state.scroll_to_alert_news = 3
     st.session_state.moa_pending_clear_custom_input = True
     st.session_state.moa_pending_clear_custom_chip = True
 
@@ -2907,7 +2954,7 @@ def render_more_with_close(
 def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
     """예방 포인트 바로 아래 — 주의 키워드 기사 목록."""
     st.markdown(
-        '<div id="alert-news-section"></div>'
+        '<div id="alert-news-section" style="height:1px;margin:0;padding:0;"></div>'
         f'<p class="phishing-moa-card-label">'
         f"🚨 주의 키워드 「{html.escape(keyword)}」 "
         f"기사 목록 {len(articles)}건</p>",
@@ -2923,7 +2970,6 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
             st.rerun()
         return
 
-    st.caption(f"주의 키워드 「{keyword}」 {len(articles)}회 언급과 같은 기사입니다.")
     render_naver_api_attribution()
 
     focus_idx = st.session_state.pop("scroll_to_alert_article", None)
@@ -3972,6 +4018,15 @@ if st.session_state.get("moa_search_source") == "alert":
     if _alert_kw:
         _alert_arts = filter_articles_by_alert_keyword(alert_news, _alert_kw)
         render_alert_inline_articles(_alert_arts, _alert_kw)
+        # 모바일: 목록 바로 아래에서 먼저 스크롤 시도 (앵커가 이미 DOM에 있음)
+        if int(st.session_state.get("scroll_to_alert_news") or 0) > 0:
+            scroll_to_dom_id(
+                "alert-news-section",
+                delay_ms=60,
+                retries=(0, 180, 400, 900),
+                offset_px=88,
+                grace_ms=2000,
+            )
 
 st.divider()
 
@@ -4355,14 +4410,14 @@ if st.session_state.pop("scroll_stay_moa_close", False):
     scroll_to_moa_screen()
 
 # 주의보 키워드 클릭 → 기사 목록으로 화면 이동
-# (query_params 정리 리런까지 카운트다운으로 유지)
+# (query_params 정리·모바일 레이아웃 리런까지 카운트다운으로 유지)
 _scroll_alert_left = int(st.session_state.get("scroll_to_alert_news") or 0)
 if _scroll_alert_left > 0:
     st.session_state.scroll_to_alert_news = _scroll_alert_left - 1
     scroll_to_dom_id(
         "alert-news-section",
-        delay_ms=80,
-        retries=(0, 120, 280, 520, 900),
-        offset_px=96,
-        grace_ms=900,
+        delay_ms=120,
+        retries=(0, 200, 450, 800, 1400, 2200),
+        offset_px=88,
+        grace_ms=2400,
     )
