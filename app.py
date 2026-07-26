@@ -155,42 +155,63 @@ st.markdown(
         margin-top: 0.6rem !important;
         margin-bottom: 0.2rem !important;
       }
-      /* Da Moa 직접검색: 좁은 화면에서 칸이 옆으로 넘치지 않게 */
+      /* Da Moa 직접검색: 한 줄 유지 + 검색 버튼이 잘리지 않게 */
       div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
         + div [data-testid="stForm"] {
         max-width: 100% !important;
-        overflow: hidden !important;
+        width: 100% !important;
+        overflow: visible !important;
       }
       div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
         + div [data-testid="stHorizontalBlock"] {
-        gap: 0.35rem !important;
+        flex-direction: row !important;
         flex-wrap: nowrap !important;
+        align-items: stretch !important;
+        gap: 0.4rem !important;
         max-width: 100% !important;
+        width: 100% !important;
       }
       div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
         + div [data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {
+        flex: 1 1 0% !important;
         min-width: 0 !important;
-        flex: 1 1 auto !important;
+        width: auto !important;
+        max-width: none !important;
       }
       div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
         + div [data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
-        flex: 0 0 auto !important;
-        width: auto !important;
-        min-width: 3.6rem !important;
-        max-width: 4.8rem !important;
+        flex: 0 0 4.75rem !important;
+        width: 4.75rem !important;
+        min-width: 4.75rem !important;
+        max-width: 4.75rem !important;
+      }
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stTextInput"],
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stTextInput"] > div {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
       }
       div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
         + div [data-testid="stTextInput"] input {
+        width: 100% !important;
         max-width: 100% !important;
-        font-size: 0.88rem !important;
-        text-overflow: ellipsis !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
+        font-size: 0.9rem !important;
+      }
+      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
+        + div [data-testid="stFormSubmitButton"] {
+        width: 100% !important;
       }
       div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
         + div [data-testid="stFormSubmitButton"] button {
+        width: 100% !important;
         min-width: 0 !important;
-        padding-left: 0.35rem !important;
-        padding-right: 0.35rem !important;
-        font-size: 0.82rem !important;
+        padding-left: 0.2rem !important;
+        padding-right: 0.2rem !important;
+        font-size: 0.78rem !important;
         white-space: nowrap !important;
       }
     }
@@ -3809,7 +3830,7 @@ st.markdown(
 )
 # form + Enter 제출 — 입력 후 엔터로도 검색
 with st.form("moa_custom_search_form", clear_on_submit=False, border=False):
-    custom_col, search_col = st.columns([5, 2], gap="small")
+    custom_col, search_col = st.columns([3, 1], gap="small")
     with custom_col:
         st.text_input(
             "직접 검색",
