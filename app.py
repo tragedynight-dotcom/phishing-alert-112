@@ -236,6 +236,8 @@ st.markdown(
       text-underline-offset: 0.14em;
       text-decoration-thickness: 2px;
       cursor: pointer;
+      -webkit-tap-highlight-color: rgba(255, 255, 255, 0.25);
+      touch-action: manipulation;
     }
     .phishing-alert-keyword-link:hover {
       color: #fee2e2 !important;
@@ -1122,6 +1124,36 @@ def render_phishing_alert_block(alert: dict) -> None:
         <div id="alert-after-prevention"></div>
         """,
         unsafe_allow_html=True,
+    )
+    # 모바일에서 주의 키워드 탭 → 쿼리 반영·스크롤이 안정적으로 동작하도록
+    components.html(
+        """
+        <script>
+        (function () {
+          const d = window.parent.document;
+          const w = window.parent;
+          const links = d.querySelectorAll("a.phishing-alert-keyword-link");
+          links.forEach(function (link) {
+            if (link.dataset.alertBound === "1") return;
+            link.dataset.alertBound = "1";
+            link.addEventListener("click", function (e) {
+              // Streamlit 모바일에서 동일 경로 쿼리 변경이 무시되는 경우 강제 이동
+              const href = link.getAttribute("href") || "";
+              if (!href) return;
+              e.preventDefault();
+              e.stopPropagation();
+              try {
+                const url = new URL(href, w.location.href);
+                w.location.assign(url.toString());
+              } catch (err) {
+                w.location.href = href;
+              }
+            }, { passive: false });
+          });
+        })();
+        </script>
+        """,
+        height=0,
     )
 
 
@@ -2626,12 +2658,14 @@ def scroll_to_dom_id(
     retries: tuple[int, ...] = (0, 200),
     fallback_selector: str | None = None,
     offset_px: int = 80,
+    grace_ms: int = 450,
 ) -> None:
     """리런 후 스크롤 위치 복원.
 
     offset_px만큼 위에 여백을 두어 제목(주의 키워드·최신 기사 등)이
     화면 밖으로 올라가지 않게 합니다.
-    휠·터치 등 사용자 스크롤이 감지되면 즉시 중단해 튕김을 막습니다.
+    모바일 탭 잔여 이벤트는 grace_ms 동안 무시하고,
+    이후 휠·터치이동이 있으면 자동 스크롤을 중단합니다.
     """
     delays = [delay_ms + r for r in retries]
     # nonce로 iframe 스크립트가 매번 다시 실행되도록 함
@@ -2644,24 +2678,26 @@ def scroll_to_dom_id(
         f"const delays={json.dumps(delays)};"
         f"const fallback={json.dumps(fallback_selector)};"
         f"const offset={int(offset_px)};"
+        f"const graceUntil=Date.now()+{int(grace_ms)};"
         "const d=window.parent.document;"
         "const w=window.parent;"
         "let cancelled=false;"
         "const timers=[];"
         "function cleanup(){"
-        "['wheel','touchmove','pointerdown','keydown'].forEach(function(ev){"
+        "['wheel','touchmove'].forEach(function(ev){"
         "w.removeEventListener(ev, onUser, true);"
         "d.removeEventListener(ev, onUser, true);"
         "});"
         "}"
         "function onUser(){"
         "if(cancelled) return;"
+        "if(Date.now()<graceUntil) return;"
         "cancelled=true;"
         "timers.forEach(function(t){clearTimeout(t);});"
         "timers.length=0;"
         "cleanup();"
         "}"
-        "['wheel','touchmove','pointerdown','keydown'].forEach(function(ev){"
+        "['wheel','touchmove'].forEach(function(ev){"
         "w.addEventListener(ev, onUser, {capture:true, passive:true});"
         "d.addEventListener(ev, onUser, {capture:true, passive:true});"
         "});"
@@ -2691,15 +2727,15 @@ def scroll_to_dom_id(
         "delays.forEach(function(t){timers.push(setTimeout(go, t));});"
         "timers.push(setTimeout(function(){"
         "cancelled=true; cleanup();"
-        "}, Math.max.apply(null, delays.concat([0])) + 80));"
+        "}, Math.max.apply(null, delays.concat([0])) + 120));"
         "})();"
         "</script>",
         height=0,
     )
 
 
-# 짧게만 맞춤 — 길게 반복하면 휠 스크롤과 충돌해 튕김
-_SECTION_SCROLL_RETRIES = (0, 60, 180)
+# 모바일 레이아웃 반영을 위해 약간 여유 있게 재시도
+_SECTION_SCROLL_RETRIES = (0, 80, 220, 480)
 _MORE_SCROLL_RETRIES = (0, 60, 160)
 
 
@@ -2811,14 +2847,16 @@ def on_moa_keyword_picker_change() -> None:
     st.session_state.pop("moa_crime_only", None)
     if picked is None:
         if st.session_state.get("moa_search_source") == "custom":
+            # 직접 검색 중 picker X는 무시 (직접 검색어 X로 지움)
             st.session_state.moa_last_picked = None
             return
-        # 주의보(alert) 목록은 더보기 리런 때 picker가 비는 경우가 있어
-        # 여기서 닫지 않음 — 목록 닫기는 「닫기」체크만 사용
+        # 주의보 열람 중 picker는 비워 두므로, 더보기 등으로 None이 되어도 목록은 유지
         if st.session_state.get("moa_search_source") == "alert":
             st.session_state.moa_last_picked = None
             return
+        # X → 키워드 검색 상태 해제
         clear_moa_keyword_selection()
+        st.session_state.scroll_stay_moa_close = True
         return
     prev_kw = st.session_state.get("moa_active_keyword")
     if prev_kw and prev_kw != picked:
@@ -2839,18 +2877,15 @@ def trigger_moa_from_alert(alert_keyword: str) -> None:
     st.session_state.moa_active_keyword = alert_keyword
     st.session_state.moa_search_source = "alert"
     st.session_state.moa_alert_display_kw = alert_keyword
-    if alert_keyword in MOA_KEYWORDS:
-        st.session_state.moa_keyword_picker = alert_keyword
-        st.session_state.moa_last_picked = alert_keyword
-        st.session_state.moa_alert_bound_to_picker = True
-    else:
-        st.session_state.moa_keyword_picker = None
-        st.session_state.moa_last_picked = None
-        st.session_state.moa_alert_bound_to_picker = False
+    # 선택창에 키워드를 넣지 않음 — 모바일에서 X가 안 지워지는 잔상 방지
+    st.session_state.moa_pending_clear_picker = True
+    st.session_state.moa_last_picked = None
+    st.session_state.moa_alert_bound_to_picker = False
     st.session_state.moa_display_count = 5
     st.session_state.moa_from_alert_nav = True
     st.session_state.scroll_to_alert_news = True
-    st.session_state.moa_custom_input = ""
+    st.session_state.moa_pending_clear_custom_input = True
+    st.session_state.moa_pending_clear_custom_chip = True
 
 
 def _moa_more_button_key(keyword: str) -> str:
@@ -3957,14 +3992,6 @@ if st.session_state.get("moa_search_source") == "alert":
         _alert_arts = filter_articles_by_alert_keyword(alert_news, _alert_kw)
         render_alert_inline_articles(_alert_arts, _alert_kw)
 
-if st.session_state.pop("scroll_to_alert_news", False):
-    scroll_to_dom_id(
-        "alert-news-section",
-        delay_ms=0,
-        retries=_SECTION_SCROLL_RETRIES,
-        offset_px=96,
-    )
-
 st.divider()
 
 # ---------------------------------------------------------------------------
@@ -4093,12 +4120,10 @@ if st.session_state.pop("moa_pending_clear_custom_input", False):
 if st.session_state.pop("moa_pending_clear_custom_chip", False):
     st.session_state.pop("moa_custom_chip", None)
 
-# 주의보 목록이 열린 동안에는 더보기 리런으로 picker가 비어도 복구
+# 주의보 기사는 선택창에 넣지 않음 — 열려 있는 동안 picker를 비워 둠
 if st.session_state.get("moa_search_source") == "alert":
-    _restore_kw = st.session_state.get("moa_alert_display_kw")
-    if _restore_kw and _restore_kw in MOA_KEYWORDS:
-        st.session_state.moa_keyword_picker = _restore_kw
-        st.session_state.moa_last_picked = _restore_kw
+    st.session_state.moa_keyword_picker = None
+    st.session_state.moa_last_picked = None
 
 st.markdown(
     '<div id="moa-keyword-picker-section"></div>'
@@ -4324,9 +4349,10 @@ if selected_kw and not moa_from_alert:
     if st.session_state.pop("scroll_to_moa_articles", False):
         scroll_to_dom_id(
             "moa-articles-section",
-            delay_ms=0,
+            delay_ms=50,
             retries=_SECTION_SCROLL_RETRIES,
             offset_px=96,
+            grace_ms=700,
         )
 
 st.caption(
@@ -4346,3 +4372,13 @@ if st.session_state.pop("scroll_stay_method_close", False):
     scroll_to_method_screen()
 if st.session_state.pop("scroll_stay_moa_close", False):
     scroll_to_moa_screen()
+
+# 주의보 키워드 클릭 → 페이지 끝에서 스크롤 (모바일 터치 잔여 이벤트 대비)
+if st.session_state.pop("scroll_to_alert_news", False):
+    scroll_to_dom_id(
+        "alert-news-section",
+        delay_ms=50,
+        retries=_SECTION_SCROLL_RETRIES,
+        offset_px=96,
+        grace_ms=700,
+    )
