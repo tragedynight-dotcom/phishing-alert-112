@@ -2628,17 +2628,14 @@ def scroll_to_dom_id(
     retries: tuple[int, ...] = (0, 200),
     fallback_selector: str | None = None,
     offset_px: int = 80,
-    grace_ms: int = 450,
+    grace_ms: int = 200,
 ) -> None:
     """리런 후 스크롤 위치 복원.
 
-    offset_px만큼 위에 여백을 두어 제목(주의 키워드·최신 기사 등)이
-    화면 밖으로 올라가지 않게 합니다.
-    모바일은 scrollIntoView + 여러 스크롤 부모에 동시 적용하고,
-    Streamlit 자체 스크롤 복원보다 늦게 재시도합니다.
+    목표 위치에 한 번 도착하면 재시도를 중단하고,
+    사용자가 스크롤하면 즉시 자동 스크롤을 멈춥니다.
     """
     delays = [delay_ms + r for r in retries]
-    # nonce로 iframe 스크립트가 매번 다시 실행되도록 함
     nonce = f"{datetime.now().timestamp()}-{id(element_id)}"
     components.html(
         "<script>"
@@ -2652,30 +2649,24 @@ def scroll_to_dom_id(
         "const d=window.parent.document;"
         "const w=window.parent;"
         "let cancelled=false;"
+        "let landed=false;"
         "const timers=[];"
-        "function cleanup(){"
-        "['wheel','touchmove'].forEach(function(ev){"
+        "function stopAll(){"
+        "if(cancelled) return;"
+        "cancelled=true;"
+        "timers.forEach(function(t){clearTimeout(t);});"
+        "timers.length=0;"
+        "['wheel','touchmove','touchstart'].forEach(function(ev){"
         "w.removeEventListener(ev, onUser, true);"
         "d.removeEventListener(ev, onUser, true);"
         "});"
         "}"
-        "function onUser(ev){"
+        "function onUser(){"
         "if(cancelled) return;"
-        "if(Date.now()<graceUntil) return;"
-        "if(ev && ev.type==='touchmove'){"
-        "const t=(ev.touches&&ev.touches[0])||null;"
-        "if(!t) return;"
-        "if(onUser._lx==null){onUser._lx=t.clientX;onUser._ly=t.clientY;return;}"
-        "const dx=Math.abs(t.clientX-onUser._lx);"
-        "const dy=Math.abs(t.clientY-onUser._ly);"
-        "if(dx<12 && dy<12) return;"
+        "if(!landed && Date.now()<graceUntil) return;"
+        "stopAll();"
         "}"
-        "cancelled=true;"
-        "timers.forEach(function(t){clearTimeout(t);});"
-        "timers.length=0;"
-        "cleanup();"
-        "}"
-        "['wheel','touchmove'].forEach(function(ev){"
+        "['wheel','touchmove','touchstart'].forEach(function(ev){"
         "w.addEventListener(ev, onUser, {capture:true, passive:true});"
         "d.addEventListener(ev, onUser, {capture:true, passive:true});"
         "});"
@@ -2711,6 +2702,22 @@ def scroll_to_dom_id(
         "].forEach(function(m){ if(m && list.indexOf(m)<0) list.push(m); });"
         "return list;"
         "}"
+        "function nearTarget(el){"
+        "try{"
+        "const top=el.getBoundingClientRect().top;"
+        "return Math.abs(top-offset)<56;"
+        "}catch(e){return false;}"
+        "}"
+        "function shouldAssist(el){"
+        "try{"
+        "const top=el.getBoundingClientRect().top;"
+        "const vh=w.innerHeight||600;"
+        "if(top < -80) return false;"
+        "if(Math.abs(top-offset)<56) return false;"
+        "if(top>=0 && top < vh*0.55) return false;"
+        "return true;"
+        "}catch(e){return true;}"
+        "}"
         "function apply(el){"
         "try{el.scrollIntoView({behavior:'auto',block:'start'});}catch(e){"
         "try{el.scrollIntoView(true);}catch(e2){}"
@@ -2736,15 +2743,20 @@ def scroll_to_dom_id(
         "if(cancelled) return;"
         "const el=findEl();"
         "if(!el) return;"
+        "if(!shouldAssist(el)){"
+        "landed=true;"
+        "stopAll();"
+        "return;"
+        "}"
         "apply(el);"
-        "try{"
-        "w.requestAnimationFrame(function(){ if(!cancelled) apply(el); });"
-        "}catch(e){}"
+        "if(!shouldAssist(el) || nearTarget(el)){"
+        "landed=true;"
+        "stopAll();"
+        "}"
         "}"
         "delays.forEach(function(t){timers.push(setTimeout(go, t));});"
-        "timers.push(setTimeout(function(){"
-        "cancelled=true; cleanup();"
-        "}, Math.max.apply(null, delays.concat([0])) + 200));"
+        "timers.push(setTimeout(stopAll,"
+        "Math.max.apply(null, delays.concat([0])) + 80));"
         "})();"
         "</script>",
         height=1,
@@ -2900,8 +2912,8 @@ def trigger_moa_from_alert(alert_keyword: str) -> None:
     st.session_state.moa_alert_bound_to_picker = False
     st.session_state.moa_display_count = 5
     st.session_state.moa_from_alert_nav = True
-    # query_params 삭제·모바일 레이아웃 리런에도 스크롤 유지
-    st.session_state.scroll_to_alert_news = 3
+    # query_params 정리 리런 1회까지 스크롤 유지
+    st.session_state.scroll_to_alert_news = 2
     st.session_state.moa_pending_clear_custom_input = True
     st.session_state.moa_pending_clear_custom_chip = True
 
@@ -4018,15 +4030,6 @@ if st.session_state.get("moa_search_source") == "alert":
     if _alert_kw:
         _alert_arts = filter_articles_by_alert_keyword(alert_news, _alert_kw)
         render_alert_inline_articles(_alert_arts, _alert_kw)
-        # 모바일: 목록 바로 아래에서 먼저 스크롤 시도 (앵커가 이미 DOM에 있음)
-        if int(st.session_state.get("scroll_to_alert_news") or 0) > 0:
-            scroll_to_dom_id(
-                "alert-news-section",
-                delay_ms=60,
-                retries=(0, 180, 400, 900),
-                offset_px=88,
-                grace_ms=2000,
-            )
 
 st.divider()
 
@@ -4410,14 +4413,13 @@ if st.session_state.pop("scroll_stay_moa_close", False):
     scroll_to_moa_screen()
 
 # 주의보 키워드 클릭 → 기사 목록으로 화면 이동
-# (query_params 정리·모바일 레이아웃 리런까지 카운트다운으로 유지)
 _scroll_alert_left = int(st.session_state.get("scroll_to_alert_news") or 0)
 if _scroll_alert_left > 0:
     st.session_state.scroll_to_alert_news = _scroll_alert_left - 1
     scroll_to_dom_id(
         "alert-news-section",
-        delay_ms=120,
-        retries=(0, 200, 450, 800, 1400, 2200),
+        delay_ms=100,
+        retries=(0, 250, 600),
         offset_px=88,
-        grace_ms=2400,
+        grace_ms=180,
     )
