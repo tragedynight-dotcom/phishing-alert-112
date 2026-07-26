@@ -2629,11 +2629,12 @@ def scroll_to_dom_id(
     fallback_selector: str | None = None,
     offset_px: int = 80,
     grace_ms: int = 200,
+    soft: bool = False,
 ) -> None:
     """리런 후 스크롤 위치 복원.
 
-    목표 위치에 한 번 도착하면 재시도를 중단하고,
-    사용자가 스크롤하면 즉시 자동 스크롤을 멈춥니다.
+    soft=True: 이미 목표 근처·지나쳤으면 강제로 끌어오지 않음(주의보 열기용).
+    soft=False: 닫기 복귀 등 — 화면 위쪽에 있는 앵커로도 반드시 이동.
     """
     delays = [delay_ms + r for r in retries]
     nonce = f"{datetime.now().timestamp()}-{id(element_id)}"
@@ -2646,6 +2647,7 @@ def scroll_to_dom_id(
         f"const fallback={json.dumps(fallback_selector)};"
         f"const offset={int(offset_px)};"
         f"const graceUntil=Date.now()+{int(grace_ms)};"
+        f"const soft={json.dumps(bool(soft))};"
         "const d=window.parent.document;"
         "const w=window.parent;"
         "let cancelled=false;"
@@ -2709,6 +2711,7 @@ def scroll_to_dom_id(
         "}catch(e){return false;}"
         "}"
         "function shouldAssist(el){"
+        "if(!soft) return true;"
         "try{"
         "const top=el.getBoundingClientRect().top;"
         "const vh=w.innerHeight||600;"
@@ -2743,13 +2746,18 @@ def scroll_to_dom_id(
         "if(cancelled) return;"
         "const el=findEl();"
         "if(!el) return;"
+        "if(nearTarget(el)){"
+        "landed=true;"
+        "stopAll();"
+        "return;"
+        "}"
         "if(!shouldAssist(el)){"
         "landed=true;"
         "stopAll();"
         "return;"
         "}"
         "apply(el);"
-        "if(!shouldAssist(el) || nearTarget(el)){"
+        "if(nearTarget(el)){"
         "landed=true;"
         "stopAll();"
         "}"
@@ -2772,10 +2780,11 @@ def scroll_to_alert_screen() -> None:
     """주의보(키워드·예방 포인트) 화면으로 스크롤."""
     scroll_to_dom_id(
         "alert-stay-anchor",
-        delay_ms=0,
-        retries=_SECTION_SCROLL_RETRIES,
+        delay_ms=50,
+        retries=(0, 150, 350, 700),
         fallback_selector=".phishing-alert-hero",
         offset_px=72,
+        grace_ms=200,
     )
 
 
@@ -2783,10 +2792,11 @@ def scroll_to_method_screen() -> None:
     """피싱 수법 Da Moa 화면으로 스크롤."""
     scroll_to_dom_id(
         "method-stay-anchor",
-        delay_ms=0,
-        retries=_SECTION_SCROLL_RETRIES,
+        delay_ms=50,
+        retries=(0, 150, 350, 700),
         fallback_selector=".phishing-backseo-hero",
         offset_px=72,
+        grace_ms=200,
     )
 
 
@@ -2794,30 +2804,44 @@ def scroll_to_moa_screen() -> None:
     """키워드(최신 피싱 기사 Da Moa) 화면으로 스크롤."""
     scroll_to_dom_id(
         "moa-stay-anchor",
-        delay_ms=0,
-        retries=_SECTION_SCROLL_RETRIES,
+        delay_ms=50,
+        retries=(0, 150, 350, 700),
         fallback_selector=".phishing-moa-hero",
         offset_px=72,
+        grace_ms=200,
     )
 
 
 def close_alert_inline_list() -> None:
     """주의보 기사 목록만 닫고 주의보 화면으로 복귀."""
     clear_moa_keyword_selection()
-    st.session_state.scroll_stay_alert_close = True
+    st.session_state.pop("scroll_to_alert_news", None)
+    st.session_state.pop("scroll_to_alert_article", None)
+    st.session_state.pop("scroll_stay_method_close", None)
+    st.session_state.pop("scroll_stay_moa_close", None)
+    st.session_state.scroll_stay_alert_close = 2
 
 
 def close_method_article_list() -> None:
     """수법 기사 목록 닫고 피싱 수법 화면으로 복귀."""
     st.session_state.method_list_closed = True
     st.session_state.pop("method_list_close_cb", None)
-    st.session_state.scroll_stay_method_close = True
+    st.session_state.pop("scroll_to_alert_news", None)
+    st.session_state.pop("scroll_to_method_article", None)
+    st.session_state.pop("scroll_stay_alert_close", None)
+    st.session_state.pop("scroll_stay_moa_close", None)
+    st.session_state.scroll_stay_method_close = 2
 
 
 def close_moa_keyword_list() -> None:
     """키워드 기사 목록 닫고 키워드 Da Moa 화면으로 복귀."""
     clear_moa_keyword_selection()
-    st.session_state.scroll_stay_moa_close = True
+    st.session_state.pop("scroll_to_alert_news", None)
+    st.session_state.pop("scroll_to_moa_article", None)
+    st.session_state.pop("scroll_to_moa_articles", None)
+    st.session_state.pop("scroll_stay_alert_close", None)
+    st.session_state.pop("scroll_stay_method_close", None)
+    st.session_state.scroll_stay_moa_close = 2
 
 
 def clear_moa_keyword_selection() -> None:
@@ -2861,7 +2885,9 @@ def on_moa_custom_chip_change() -> None:
     """직접 검색어 selectbox의 X — 검색어·기사 목록 삭제."""
     if st.session_state.get("moa_custom_chip") is None:
         clear_moa_keyword_selection()
-        st.session_state.scroll_stay_moa_close = True
+        st.session_state.pop("scroll_stay_alert_close", None)
+        st.session_state.pop("scroll_stay_method_close", None)
+        st.session_state.scroll_stay_moa_close = 2
 
 
 def on_moa_crime_only_change() -> None:
@@ -2885,7 +2911,9 @@ def on_moa_keyword_picker_change() -> None:
             return
         # X → 키워드 검색 상태 해제
         clear_moa_keyword_selection()
-        st.session_state.scroll_stay_moa_close = True
+        st.session_state.pop("scroll_stay_alert_close", None)
+        st.session_state.pop("scroll_stay_method_close", None)
+        st.session_state.scroll_stay_moa_close = 2
         return
     prev_kw = st.session_state.get("moa_active_keyword")
     if prev_kw and prev_kw != picked:
@@ -4108,6 +4136,8 @@ if news_list:
             prev_count = st.session_state.display_count
             st.session_state.display_count = prev_count + 10
             st.session_state.scroll_to_method_article = prev_count + 1
+            st.session_state.pop("scroll_to_alert_news", None)
+            st.session_state.pop("scroll_stay_alert_close", None)
             st.session_state["_clear_method_list_close_cb"] = True
             st.rerun()
         elif method_action == "close":
@@ -4361,6 +4391,8 @@ if selected_kw and not moa_from_alert:
                 prev_count = st.session_state.moa_display_count
                 st.session_state.moa_display_count = prev_count + 10
                 st.session_state.scroll_to_moa_article = prev_count + 1
+                st.session_state.pop("scroll_to_alert_news", None)
+                st.session_state.pop("scroll_stay_alert_close", None)
                 st.session_state["_clear_moa_list_close_cb"] = True
                 st.rerun()
             elif moa_action == "close":
@@ -4405,11 +4437,17 @@ st.caption(
 st.caption("무단 복제·전재·배포를 금지하며, 의심 정황은 **112** 또는 **1332**로 신고해 주세요.")
 
 # 닫기 후 각 섹션 화면으로 최종 복귀 (위젯 포커스보다 늦게)
-if st.session_state.pop("scroll_stay_alert_close", False):
+_scroll_alert_close = int(st.session_state.get("scroll_stay_alert_close") or 0)
+if _scroll_alert_close > 0:
+    st.session_state.scroll_stay_alert_close = _scroll_alert_close - 1
     scroll_to_alert_screen()
-if st.session_state.pop("scroll_stay_method_close", False):
+_scroll_method_close = int(st.session_state.get("scroll_stay_method_close") or 0)
+if _scroll_method_close > 0:
+    st.session_state.scroll_stay_method_close = _scroll_method_close - 1
     scroll_to_method_screen()
-if st.session_state.pop("scroll_stay_moa_close", False):
+_scroll_moa_close = int(st.session_state.get("scroll_stay_moa_close") or 0)
+if _scroll_moa_close > 0:
+    st.session_state.scroll_stay_moa_close = _scroll_moa_close - 1
     scroll_to_moa_screen()
 
 # 주의보 키워드 클릭 → 기사 목록으로 화면 이동
@@ -4422,4 +4460,5 @@ if _scroll_alert_left > 0:
         retries=(0, 250, 600),
         offset_px=88,
         grace_ms=180,
+        soft=True,
     )
