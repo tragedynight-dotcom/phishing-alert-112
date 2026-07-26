@@ -120,7 +120,6 @@ st.markdown(
     [data-testid="InputInstructions"] {
       display: none !important;
     }
-    .phishing-moa-search-wrap-anchor { display: none; }
     h1.phishing-mobile-title {
       font-size: 2.25rem;
       font-weight: 600;
@@ -154,65 +153,6 @@ st.markdown(
       h2.phishing-mobile-title {
         margin-top: 0.6rem !important;
         margin-bottom: 0.2rem !important;
-      }
-      /* Da Moa 직접검색: 한 줄 유지 + 검색 버튼이 잘리지 않게 */
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stForm"] {
-        max-width: 100% !important;
-        width: 100% !important;
-        overflow: visible !important;
-      }
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stHorizontalBlock"] {
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        align-items: stretch !important;
-        gap: 0.4rem !important;
-        max-width: 100% !important;
-        width: 100% !important;
-      }
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {
-        flex: 1 1 0% !important;
-        min-width: 0 !important;
-        width: auto !important;
-        max-width: none !important;
-      }
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
-        flex: 0 0 4.75rem !important;
-        width: 4.75rem !important;
-        min-width: 4.75rem !important;
-        max-width: 4.75rem !important;
-      }
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stTextInput"],
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stTextInput"] > div {
-        width: 100% !important;
-        max-width: 100% !important;
-        min-width: 0 !important;
-      }
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stTextInput"] input {
-        width: 100% !important;
-        max-width: 100% !important;
-        min-width: 0 !important;
-        box-sizing: border-box !important;
-        font-size: 0.9rem !important;
-      }
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stFormSubmitButton"] {
-        width: 100% !important;
-      }
-      div[data-testid="stElementContainer"]:has(.phishing-moa-search-wrap-anchor)
-        + div [data-testid="stFormSubmitButton"] button {
-        width: 100% !important;
-        min-width: 0 !important;
-        padding-left: 0.2rem !important;
-        padding-right: 0.2rem !important;
-        font-size: 0.78rem !important;
-        white-space: nowrap !important;
       }
     }
     .phishing-alert-badge {
@@ -3824,26 +3764,19 @@ st.markdown(
     '<p class="phishing-moa-picker-hint">🔎 또는 검색어를 직접 입력해 주세요</p>',
     unsafe_allow_html=True,
 )
-st.markdown(
-    '<div class="phishing-moa-search-wrap-anchor"></div>',
-    unsafe_allow_html=True,
-)
-# form + Enter 제출 — 입력 후 엔터로도 검색
+# form + Enter 제출 — 입력칸 위 / 검색 버튼 아래 (모바일 잘림 없음)
 with st.form("moa_custom_search_form", clear_on_submit=False, border=False):
-    custom_col, search_col = st.columns([3, 1], gap="small")
-    with custom_col:
-        st.text_input(
-            "직접 검색",
-            placeholder="예: 노쇼, 대포통장 등",
-            label_visibility="collapsed",
-            key="moa_custom_input",
-            max_chars=40,
-        )
-    with search_col:
-        moa_custom_clicked = st.form_submit_button(
-            "🔍 검색",
-            use_container_width=True,
-        )
+    st.text_input(
+        "직접 검색",
+        placeholder="예: 노쇼, 대포통장 등",
+        label_visibility="collapsed",
+        key="moa_custom_input",
+        max_chars=40,
+    )
+    moa_custom_clicked = st.form_submit_button(
+        "🔍 검색",
+        use_container_width=True,
+    )
 
 if moa_custom_clicked:
     custom_q = (st.session_state.get("moa_custom_input") or "").strip()
