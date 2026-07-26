@@ -2630,14 +2630,20 @@ def scroll_to_dom_id(
     offset_px: int = 80,
     grace_ms: int = 200,
     soft: bool = False,
+    cancel_on_touchstart: bool = True,
 ) -> None:
     """리런 후 스크롤 위치 복원.
 
     soft=True: 이미 목표 근처·지나쳤으면 강제로 끌어오지 않음(주의보 열기용).
     soft=False: 닫기 복귀 등 — 화면 위쪽에 있는 앵커로도 반드시 이동.
+    cancel_on_touchstart=False: 셀렉트박스 선택 직후 잔여 터치로 스크롤이
+    바로 취소되지 않게 함(키워드 검색용).
     """
     delays = [delay_ms + r for r in retries]
     nonce = f"{datetime.now().timestamp()}-{id(element_id)}"
+    cancel_events = ["wheel", "touchmove"]
+    if cancel_on_touchstart:
+        cancel_events.append("touchstart")
     components.html(
         "<script>"
         "(function(){"
@@ -2648,6 +2654,7 @@ def scroll_to_dom_id(
         f"const offset={int(offset_px)};"
         f"const graceUntil=Date.now()+{int(grace_ms)};"
         f"const soft={json.dumps(bool(soft))};"
+        f"const cancelEv={json.dumps(cancel_events)};"
         "const d=window.parent.document;"
         "const w=window.parent;"
         "let cancelled=false;"
@@ -2658,7 +2665,7 @@ def scroll_to_dom_id(
         "cancelled=true;"
         "timers.forEach(function(t){clearTimeout(t);});"
         "timers.length=0;"
-        "['wheel','touchmove','touchstart'].forEach(function(ev){"
+        "cancelEv.forEach(function(ev){"
         "w.removeEventListener(ev, onUser, true);"
         "d.removeEventListener(ev, onUser, true);"
         "});"
@@ -2668,7 +2675,7 @@ def scroll_to_dom_id(
         "if(!landed && Date.now()<graceUntil) return;"
         "stopAll();"
         "}"
-        "['wheel','touchmove','touchstart'].forEach(function(ev){"
+        "cancelEv.forEach(function(ev){"
         "w.addEventListener(ev, onUser, {capture:true, passive:true});"
         "d.addEventListener(ev, onUser, {capture:true, passive:true});"
         "});"
@@ -2926,7 +2933,7 @@ def on_moa_keyword_picker_change() -> None:
     st.session_state.pop("moa_alert_bound_to_picker", None)
     st.session_state.moa_pending_clear_custom_input = True
     st.session_state.moa_pending_clear_custom_chip = True
-    st.session_state.scroll_to_moa_articles = True
+    st.session_state.scroll_to_moa_articles = 2
 
 
 def trigger_moa_from_alert(alert_keyword: str) -> None:
@@ -4177,7 +4184,7 @@ if _pending_custom:
     st.session_state.pop("moa_alert_display_kw", None)
     st.session_state.pop("moa_pending_clear_picker", None)
     st.session_state.pop("moa_pending_clear_custom_chip", None)
-    st.session_state.scroll_to_moa_articles = True
+    st.session_state.scroll_to_moa_articles = 2
 
 if st.session_state.pop("moa_pending_clear_picker", False):
     st.session_state.moa_keyword_picker = None
@@ -4305,6 +4312,11 @@ if selected_kw and not moa_from_alert:
         discard_widget_key(moa_more_key)
         st.session_state.pop("moa_crime_only", None)
     else:
+        # 컬럼 밖에 앵커 — 키워드마다 안정적으로 스크롤 타깃 확보
+        st.markdown(
+            '<div id="moa-articles-section" style="height:1px;margin:0;padding:0;"></div>',
+            unsafe_allow_html=True,
+        )
         # 「최신 기사 N건」 바로 옆에 범죄기사 체크 (오른쪽 여백으로 붙임)
         label_col, crime_col, _pad = st.columns(
             [3.1, 1.15, 3.2], vertical_alignment="center"
@@ -4312,7 +4324,7 @@ if selected_kw and not moa_from_alert:
         with label_col:
             st.markdown(
                 f'<div class="phishing-moa-label-row">'
-                f'<p class="phishing-moa-card-label" id="moa-articles-section">'
+                f'<p class="phishing-moa-card-label">'
                 f"「{html.escape(str(selected_kw))}」 최신 기사 "
                 f"{len(moa_articles)}건</p></div>",
                 unsafe_allow_html=True,
@@ -4416,16 +4428,6 @@ if selected_kw and not moa_from_alert:
                 close_moa_keyword_list()
                 st.rerun()
 
-    # 키워드·직접 검색 직후 제목(최신 기사 N건)이 보이도록 이동
-    if st.session_state.pop("scroll_to_moa_articles", False):
-        scroll_to_dom_id(
-            "moa-articles-section",
-            delay_ms=50,
-            retries=_SECTION_SCROLL_RETRIES,
-            offset_px=96,
-            grace_ms=700,
-        )
-
 st.caption(
     "본 서비스는 **민간 범죄 예방 안내용**이며, 수사기관·금융당국의 공식 경보·긴급 통보를 "
     "대체하지 않습니다."
@@ -4449,6 +4451,21 @@ _scroll_moa_close = int(st.session_state.get("scroll_stay_moa_close") or 0)
 if _scroll_moa_close > 0:
     st.session_state.scroll_stay_moa_close = _scroll_moa_close - 1
     scroll_to_moa_screen()
+
+# 키워드·직접 검색 → 최신 기사 제목으로 이동
+# (셀렉트박스 포커스 스크롤보다 늦게, 리런 1회까지 유지)
+_scroll_moa_arts = int(st.session_state.get("scroll_to_moa_articles") or 0)
+if _scroll_moa_arts > 0:
+    st.session_state.scroll_to_moa_articles = _scroll_moa_arts - 1
+    scroll_to_dom_id(
+        "moa-articles-section",
+        delay_ms=120,
+        retries=(0, 280, 600, 1100),
+        offset_px=96,
+        grace_ms=500,
+        soft=False,
+        cancel_on_touchstart=False,
+    )
 
 # 주의보 키워드 클릭 → 기사 목록으로 화면 이동
 _scroll_alert_left = int(st.session_state.get("scroll_to_alert_news") or 0)
