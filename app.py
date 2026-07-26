@@ -1054,7 +1054,7 @@ def render_app_analysis_block(analysis: dict) -> None:
 
 
 def render_phishing_alert_block(alert: dict) -> None:
-    """피싱 주의보 — 강조형 카드 UI. 키워드는 밑줄 링크로 Da Moa 이동."""
+    """피싱 주의보 — 키워드 링크 클릭 시 예방 포인트 아래 기사 목록으로 이동."""
     keywords = alert.get("keywords") or [alert["keyword"]]
     keywords = [kw for kw in keywords if kw]
     count = alert["count"]
@@ -1124,36 +1124,6 @@ def render_phishing_alert_block(alert: dict) -> None:
         <div id="alert-after-prevention"></div>
         """,
         unsafe_allow_html=True,
-    )
-    # 모바일에서 주의 키워드 탭 → 쿼리 반영·스크롤이 안정적으로 동작하도록
-    components.html(
-        """
-        <script>
-        (function () {
-          const d = window.parent.document;
-          const w = window.parent;
-          const links = d.querySelectorAll("a.phishing-alert-keyword-link");
-          links.forEach(function (link) {
-            if (link.dataset.alertBound === "1") return;
-            link.dataset.alertBound = "1";
-            link.addEventListener("click", function (e) {
-              // Streamlit 모바일에서 동일 경로 쿼리 변경이 무시되는 경우 강제 이동
-              const href = link.getAttribute("href") || "";
-              if (!href) return;
-              e.preventDefault();
-              e.stopPropagation();
-              try {
-                const url = new URL(href, w.location.href);
-                w.location.assign(url.toString());
-              } catch (err) {
-                w.location.href = href;
-              }
-            }, { passive: false });
-          });
-        })();
-        </script>
-        """,
-        height=0,
     )
 
 
@@ -3934,16 +3904,25 @@ elif fetch_errors:
 
 crime_counter = Counter(alert_crime_hits)
 
-# 주의보 키워드 하이퍼링크(?alert_moa=&n=) — nonce로 한 번만 적용, X 후 재점화 방지
+# 주의보 키워드 하이퍼링크(?alert_moa=&n=) — nonce로 한 번만 적용
 _alert_moa_q = st.query_params.get("alert_moa")
 _alert_moa_n = st.query_params.get("n")
+if isinstance(_alert_moa_q, (list, tuple)):
+    _alert_moa_q = _alert_moa_q[0] if _alert_moa_q else None
+if isinstance(_alert_moa_n, (list, tuple)):
+    _alert_moa_n = _alert_moa_n[0] if _alert_moa_n else None
 if _alert_moa_q:
     _nonce = str(_alert_moa_n or "")
     _consumed = str(st.session_state.get("moa_alert_consumed_nonce") or "")
     if _nonce and _nonce != _consumed:
         trigger_moa_from_alert(str(_alert_moa_q))
         st.session_state.moa_alert_consumed_nonce = _nonce
-        st.session_state.moa_alert_link_nonce = int(_nonce) + 1
+        try:
+            st.session_state.moa_alert_link_nonce = int(_nonce) + 1
+        except ValueError:
+            st.session_state.moa_alert_link_nonce = (
+                int(st.session_state.get("moa_alert_link_nonce") or 1) + 1
+            )
     for _qp in ("alert_moa", "n"):
         if _qp in st.query_params:
             try:
