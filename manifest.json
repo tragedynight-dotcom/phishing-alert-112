@@ -1,6 +1,6 @@
 {
   "name": "피싱범죄 DaMoa",
-  "short_name": "DaMoa",
+  "short_name": "피싱범죄 DaMoa",
   "description": "전기통신금융사기·피싱 뉴스 모아보기",
   "start_url": "./",
   "scope": "./",
