@@ -1,7 +1,7 @@
 // Streamlit Cloud 배포 주소를 아래에 넣으세요.
 // 예: https://your-app-name.streamlit.app/?embed=true&show_footer=false
 const CONFIG = {
-  cacheVersion: "v5",
+  cacheVersion: "v6",
   appName: "피싱범죄 DaMoa",
   appShortName: "피싱범죄 DaMoa",
   iframeUrl:
