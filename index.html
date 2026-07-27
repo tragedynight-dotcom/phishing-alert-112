@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>피싱 범죄 Da Moa</title>
+    <meta name="application-name" content="Da Moa" />
+    <meta name="apple-mobile-web-app-title" content="Da Moa" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#b91c1c" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" sizes="180x180" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="offline-overlay" hidden>
+      <div class="offline-icon" aria-hidden="true">⚠</div>
+      <h1>오프라인입니다</h1>
+      <p>인터넷 연결 후 다시 열어 주세요.</p>
+    </div>
+    <iframe
+      id="app-frame"
+      title="피싱 범죄 Da Moa"
+      allow="clipboard-read; clipboard-write; fullscreen"
+      referrerpolicy="no-referrer-when-downgrade"
+    ></iframe>
+    <script src="./config.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

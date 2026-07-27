@@ -1,0 +1,47 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #b91c1c;
+}
+
+iframe {
+  border: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #fff;
+}
+
+#offline-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #fff;
+  background: #7f1d1d;
+  font-family: "Pretendard", "Noto Sans KR", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+}
+
+.offline-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+#offline-overlay h1 {
+  font-size: 1.5rem;
+  margin: 0 0 0.75rem;
+}
+
+#offline-overlay p {
+  margin: 0;
+  padding: 0 1.5rem;
+  color: #fecaca;
+}
