@@ -1246,9 +1246,8 @@ def render_moa_section_header() -> None:
         (function () {
           const d = window.parent.document;
           const w = window.parent;
-          const link = d.querySelector("a.phishing-moa-count");
-          if (!link || link.dataset.scrollBound === "1") return;
-          link.dataset.scrollBound = "1";
+          if (d.documentElement.dataset.moaPickerDelegate === "1") return;
+          d.documentElement.dataset.moaPickerDelegate = "1";
 
           function fireClick(el) {
             if (!el) return;
@@ -1268,7 +1267,7 @@ def render_moa_section_header() -> None:
             if (marker) {
               let n = marker.closest('[data-testid="stElementContainer"]');
               n = n ? n.nextElementSibling : null;
-              for (let i = 0; i < 8 && n; i++) {
+              for (let i = 0; i < 12 && n; i++) {
                 const box = n.querySelector(
                   '[data-testid="stSelectbox"], .stSelectbox'
                 );
@@ -1280,7 +1279,7 @@ def render_moa_section_header() -> None:
             if (anchor) {
               let n = anchor.closest('[data-testid="stElementContainer"]');
               n = n ? n.nextElementSibling : null;
-              for (let i = 0; i < 8 && n; i++) {
+              for (let i = 0; i < 12 && n; i++) {
                 const box = n.querySelector(
                   '[data-testid="stSelectbox"], .stSelectbox'
                 );
@@ -1288,31 +1287,33 @@ def render_moa_section_header() -> None:
                 n = n.nextElementSibling;
               }
             }
-            return d.querySelector('[data-testid="stSelectbox"], .stSelectbox');
+            // 키워드 선택창만: placeholder 텍스트로 보조 탐색
+            const boxes = d.querySelectorAll('[data-testid="stSelectbox"], .stSelectbox');
+            for (let i = 0; i < boxes.length; i++) {
+              const t = (boxes[i].innerText || "").trim();
+              if (t.indexOf("키워드 선택") >= 0 || t.indexOf("키워드") >= 0) {
+                return boxes[i];
+              }
+            }
+            return boxes[0] || null;
           }
 
           function openDropdownArrow(box) {
-            // 화살표(드롭다운 인디케이터) 우선 클릭 → 목록 현출
-            const arrow =
-              box.querySelector('[data-testid="stSelectboxChevron"]') ||
-              box.querySelector('[data-baseweb="select"] svg') ||
-              box.querySelector('[class*="dropdown"] svg') ||
-              box.querySelector("svg");
+            if (!box) return false;
             const combo =
               box.querySelector('[role="combobox"]') ||
               box.querySelector('[data-baseweb="select"] > div') ||
               box.querySelector('[data-baseweb="select"]') ||
               box.querySelector("input");
+            const arrow =
+              box.querySelector('[data-testid="stSelectboxChevron"]') ||
+              box.querySelector('[data-baseweb="select"] svg') ||
+              box.querySelector("svg");
 
-            if (arrow) {
-              // svg 클릭이 안 먹으면 부모(화살표 영역) 클릭
-              fireClick(arrow.closest("div") || arrow);
-            }
+            // value container / combobox 를 먼저 열어 BaseWeb 드롭다운 유도
             if (combo) {
+              try { combo.focus(); } catch (err) {}
               fireClick(combo);
-              try {
-                combo.focus();
-              } catch (err) {}
               combo.dispatchEvent(
                 new KeyboardEvent("keydown", {
                   key: "ArrowDown",
@@ -1324,32 +1325,52 @@ def render_moa_section_header() -> None:
                 })
               );
             }
+            if (arrow) {
+              fireClick(arrow.closest("div") || arrow);
+            }
+            // 목록이 열렸는지 확인
+            return !!(
+              d.querySelector('[data-baseweb="popover"]') ||
+              d.querySelector('[data-baseweb="menu"]') ||
+              d.querySelector('ul[role="listbox"]') ||
+              d.querySelector('[role="listbox"]')
+            );
           }
 
           function openMoaKeywordPicker() {
-            const anchor = d.getElementById("moa-keyword-picker-section");
+            // 사용자 제스처 안에서 즉시 1회 시도 (모바일 드롭다운 허용)
+            openDropdownArrow(findMoaSelectbox());
+
+            const anchor =
+              d.getElementById("moa-keyword-picker-section") ||
+              d.getElementById("moa-keyword-select-marker");
             if (anchor) {
               anchor.scrollIntoView({ behavior: "smooth", block: "center" });
             }
-            // 스크롤 안정화 후 화살표 클릭으로 목록 열기 (재시도)
             var tries = 0;
             function attempt() {
               tries += 1;
-              const box = findMoaSelectbox();
-              if (box) {
-                openDropdownArrow(box);
-                return;
-              }
-              if (tries < 6) window.setTimeout(attempt, 120);
+              const opened = openDropdownArrow(findMoaSelectbox());
+              if (opened) return;
+              if (tries < 10) w.setTimeout(attempt, 150);
             }
-            window.setTimeout(attempt, 280);
+            w.setTimeout(attempt, 200);
           }
 
-          link.addEventListener("click", function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            openMoaKeywordPicker();
-          });
+          // Streamlit 리렌더로 링크가 바뀌어도 동작하도록 문서에 위임
+          d.addEventListener(
+            "click",
+            function (e) {
+              const link = e.target && e.target.closest
+                ? e.target.closest("a.phishing-moa-count")
+                : null;
+              if (!link) return;
+              e.preventDefault();
+              e.stopPropagation();
+              openMoaKeywordPicker();
+            },
+            true
+          );
         })();
         </script>
         """,
