@@ -1085,7 +1085,7 @@ def format_phishing_112_report_hint(keyword: str | list[str] | None) -> str:
         label = " · ".join(labels) if labels else "피싱"
     else:
         label = (keyword or "").strip() or "피싱"
-    return f"「{label}」 의심 시 즉시 112에 신고해 주세요."
+    return f"그리고 「{label}」 의심 시 즉시 112에 신고해 주세요."
 
 
 def render_app_analysis_block(analysis: dict) -> None:
