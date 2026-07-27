@@ -21,57 +21,105 @@ st.set_page_config(
 
 
 def inject_pwa_head() -> None:
-    """홈 화면 추가 시 'Streamlit' 대신 앱 이름·👮 아이콘이 보이도록 부모 문서 head 수정."""
+    """홈 화면 추가·앱 설치 시 'Streamlit' 대신 Da Moa 이름·아이콘이 보이도록 head 덮어쓰기.
+
+    iOS Safari '홈 화면에 추가'는 apple-mobile-web-app-title / apple-touch-icon을 사용합니다.
+    Android Chrome의 Streamlit Cloud '앱 설치'는 플랫폼 PWA 이름(Streamlit)을 쓰는 경우가 많아
+    완전 교체가 안 될 수 있습니다. 그 경우 정적 셸(GitHub Pages 등) 래퍼가 필요합니다.
+    """
+    # static 서빙이 실패해도 동작하도록 아이콘을 data URI로 인라인
+    icon_192 = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAACwklEQVR42u3dwY3kMBAEQRpC/32QdZQLeraYUUD+F6MOHBa4Ha1n7yNVWz4EASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgASABIAEgATCyr/NZAZA5digAcPQwAODwQQDA4YMAgOOHAACHDwIAjh8CABw+CAA4fggAcPwQAOD4IQAAAAAAcPwQAOD4IQDA8UMAAAAAAOD4IQBg3PFP/dk8ewAAAMCHAAAAjj8IAAIAAADA8ZcB1BEAAAAAAAAAgOPPAigjAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADHnwFQRQAAAAAAAAAAAAAAAAR+CQYAAAAAAAAAAAAAAAAAAAAAAAAAgMBfhAEAAAAAAAAAABD4XiAAAAAAAAAAAAACX44LAAAAAADBfACeOQAACIDpx+b4Afg9gkk/j2cMAAACoPjKVM8WgCwCzxSALALPEoAsAs8QAP8CeJYA1H8BhgGA9OGDAED+6GEAwPFD0AZgICQBGAhZAAZBEoCBkAVgEGQBGARZAAZBFoBBkAVgEGQBGARZAAZBFoBBkAVgEABgABQBGARZAAYBAAZAEYBBAIABAIABEANgEABgAABgAMQAGAQAGAAAGAAAGAAAGAAAGAAAGAAAGAAAGAAAGAAAGAAAGAAAGAD+N6g5fgAMAAAMAH8TbI4fAAPAF2OZL8YCwACAwHw5LgAGAATm/QAQmFckQWBekgeAAQCBeU8wBOZN8RDYPcd/HQAIHH8eAASOPw8ABIcPAASOHwAIHD8AIDh8AEBw+ACA4PABAMHhA5CG4FkDkITg2QKQw+AZApDD4FkBkALhWQCQgOGzBUACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkDa5wXBC++IBENb0gAAAABJRU5ErkJggg=="
+    )
+    icon_512 = (
+        "data:image/png;base64,"
+        "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BAAiwMwcfwQAIsDMHH8EACLAzBx/BAAiwMwcfwHgIwgAMxMACABEgJk5/ggARICZOf4IAESAmTn+CABEgJk5/ggARICZOf4IAESAmTn+CABEgJk5/ggARICZOf4IAESAmTn+CABEgJk5/ggARICZOf4IAESAmTn+CABEgJnj728TAgAhYObwgwBABJg5/iAAEAFmjj8IAESAmeOPAAAhYObwIwBABJg5/ggAEAJmDj8CAESAmeOPAAARYOb4IwBACJg5/AgAEAJmDj8CABFgZo4/AgAhYObwgwBACJg5/CAAEAFmjj8IAISAmcMPAgAhYObwgwBACJg5/CAAEAJmDj8IAISAmcMPAgAhYObwIwBADJg5+ggAEAJmDj8CAISAOfwgAEAMmKMPAgDEgDn6IABADJijDwIAxIA5+iAAQAyYow8CAMSAOfogAEAQmIMPAgAEgTn4IABAEDj4gAAAYeDQAwIARIFjDwgAEAgOPCAAQCg47IAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAAABAAAIAABAAAAAAgAAEAAAgAAAAAQAACAAAAABAAACwIcAAAEAAAgAAEAAAAACAAAQAACAAAAABAAAIAAAAAEAAAgAAEAAAAACAAAQAACAAAAABAAAIAAAQAD4CAAgAAAAAQAACAAAQAAAAAIAABAAAMCvLstempI/helCAAAAAElFTkSuQmCC"
+    )
+    apple_icon = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAAClUlEQVR42u3dwW2EQBREwQmE/HMgOigAwY353dXSu1tDWV6JNazzOC4ppeUQBLQEtAS0BLQAloCWgJaAloAW0BLQEtAS0BLQAloCWgJaAloCWkBLQEtAS0BLQAtoCWgJaAloCWgBLQEtAS0BLQEtoCWgJaAloAW0gxDQeu9pzgbosXi/zhkCPR4x3EDHIoYb6GjIYAMdixlqoKMggw10LGaogY7DDDXQUZDBBjoWM9RAAw00zFADDTPUQMMMNdBAA90OOn1Aw/wrIqiBBhpooHf9M++jB9BAAw000EDDPBh0G2qggQYaaKCBLriRkvrLBjTQQAMNNNBAAw000EADDTTQQAMNNNBAAw000EADDTTQQAMNNNBAAw000EADDTTQQAMNte9DAw000EADDTTQQAMNtccYAA000EB7tp1n2wENNNBAjwIEM9BAAw30rohgBno71Dv8HKe3YAENNNBQX14UBDTUMAMNNcxAAw00yD52AA0x3ECDDDbQIIMNNMhtsBfMUAMNMthAwww10DBD3QfawI4BbVDHgDaoY0Ab1DGgDWqgDWiYDWiYoQYaZqiBNqBngjaogTagYbbpqIE2oIEGGmiYoQbagAbagAbagIYZaqCBBhpoAxpoAxpoAxpooIEGGmigDWg3VsyNFaANaKCBBhpooH3B32AG2oCG2vzXN9BAAw01zEAb0J4+ap4+CjXMQAMNNNBQw+wtWAaz9xSa9xRCDTPQUMMMNNQwAw12N+RY0FD3Yo4FDXUn5mjQYHdBrgENdgfkOtCtsNuubx3oFtit17UWdCrs9utZDzoBt2sH9HjcrhHQo4G7BkCPRe5sgZaAFtAS0BLQEtAC2iEIaAloCWgJaAEtAS0BLQEtffpK7w0HdsD7ttYjTQAAAABJRU5ErkJggg=="
+    )
     components.html(
-        """
+        f"""
         <script>
-        (function () {
+        (function () {{
           const doc = window.parent.document;
           const APP_NAME = "피싱 범죄 Da Moa";
           const SHORT_NAME = "Da Moa";
-          const ICON = "/app/static/icon.svg";
-          const MANIFEST = "/app/static/manifest.json";
+          const ICON_192 = {json.dumps(icon_192)};
+          const ICON_512 = {json.dumps(icon_512)};
+          const APPLE_ICON = {json.dumps(apple_icon)};
 
-          doc.title = APP_NAME;
+          let manifestUrl = null;
+          function getManifestUrl() {{
+            if (manifestUrl) return manifestUrl;
+            const manifest = {{
+              name: APP_NAME,
+              short_name: SHORT_NAME,
+              description: "전기통신금융사기·피싱 뉴스 모아보기",
+              start_url: window.parent.location.pathname || "/",
+              scope: "/",
+              display: "standalone",
+              background_color: "#b91c1c",
+              theme_color: "#b91c1c",
+              lang: "ko",
+              icons: [
+                {{ src: ICON_192, sizes: "192x192", type: "image/png", purpose: "any" }},
+                {{ src: ICON_512, sizes: "512x512", type: "image/png", purpose: "any" }},
+                {{ src: ICON_192, sizes: "192x192", type: "image/png", purpose: "maskable" }},
+                {{ src: ICON_512, sizes: "512x512", type: "image/png", purpose: "maskable" }}
+              ]
+            }};
+            const blob = new Blob([JSON.stringify(manifest)], {{ type: "application/manifest+json" }});
+            manifestUrl = URL.createObjectURL(blob);
+            return manifestUrl;
+          }}
 
-          function upsertMeta(name, content, attr) {
+          function upsertMeta(name, content, attr) {{
             attr = attr || "name";
             let el = doc.querySelector("meta[" + attr + '="' + name + '"]');
-            if (!el) {
+            if (!el) {{
               el = doc.createElement("meta");
               el.setAttribute(attr, name);
               doc.head.appendChild(el);
-            }
+            }}
             el.setAttribute("content", content);
-          }
+          }}
 
-          upsertMeta("application-name", SHORT_NAME);
-          upsertMeta("apple-mobile-web-app-title", SHORT_NAME);
-          upsertMeta("apple-mobile-web-app-capable", "yes");
-          upsertMeta("mobile-web-app-capable", "yes");
-          upsertMeta("theme-color", "#b91c1c");
+          function upsertLink(rel, href, attrs) {{
+            const link = doc.createElement("link");
+            link.rel = rel;
+            link.href = href;
+            if (attrs) {{
+              Object.keys(attrs).forEach(function (k) {{
+                link.setAttribute(k, attrs[k]);
+              }});
+            }}
+            doc.head.appendChild(link);
+          }}
 
-          if (!doc.querySelector('link[rel="manifest"]')) {
-            const manifestLink = doc.createElement("link");
-            manifestLink.rel = "manifest";
-            manifestLink.href = MANIFEST;
-            doc.head.appendChild(manifestLink);
-          }
+          function applyPwaHead() {{
+            doc.title = APP_NAME;
+            upsertMeta("application-name", SHORT_NAME);
+            upsertMeta("apple-mobile-web-app-title", SHORT_NAME);
+            upsertMeta("apple-mobile-web-app-capable", "yes");
+            upsertMeta("mobile-web-app-capable", "yes");
+            upsertMeta("theme-color", "#b91c1c");
+            doc.querySelectorAll('link[rel="manifest"], link[rel="icon"], link[rel="apple-touch-icon"], link[rel="shortcut icon"]').forEach(function (el) {{
+              el.remove();
+            }});
+            upsertLink("manifest", getManifestUrl());
+            upsertLink("apple-touch-icon", APPLE_ICON, {{ sizes: "180x180" }});
+            upsertLink("icon", ICON_192, {{ type: "image/png", sizes: "192x192" }});
+            upsertLink("icon", ICON_512, {{ type: "image/png", sizes: "512x512" }});
+          }}
 
-          if (!doc.querySelector('link[rel="apple-touch-icon"]')) {
-            const touch = doc.createElement("link");
-            touch.rel = "apple-touch-icon";
-            touch.href = ICON;
-            doc.head.appendChild(touch);
-          }
-
-          if (!doc.querySelector('link[rel="icon"]')) {
-            const fav = doc.createElement("link");
-            fav.rel = "icon";
-            fav.href = ICON;
-            doc.head.appendChild(fav);
-          }
-        })();
+          applyPwaHead();
+          setTimeout(applyPwaHead, 300);
+          setTimeout(applyPwaHead, 1000);
+          setTimeout(applyPwaHead, 3000);
+        }})();
         </script>
         """,
         height=0,
