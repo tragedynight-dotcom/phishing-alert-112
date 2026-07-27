@@ -165,6 +165,13 @@ st.markdown(
     [data-testid="InputInstructions"] {
       display: none !important;
     }
+    /* 키워드 드롭다운이 다른 요소에 가리지 않도록 */
+    [data-baseweb="popover"],
+    [data-baseweb="menu"],
+    ul[role="listbox"],
+    [role="listbox"] {
+      z-index: 100000 !important;
+    }
     h1.phishing-mobile-title {
       font-size: 2.25rem;
       font-weight: 600;
@@ -1246,20 +1253,35 @@ def render_moa_section_header() -> None:
         (function () {
           const d = window.parent.document;
           const w = window.parent;
-          if (d.documentElement.dataset.moaPickerDelegate === "1") return;
-          d.documentElement.dataset.moaPickerDelegate = "1";
+          // 버전 올려 이전(토글 버그) 핸들러 교체
+          if (d.documentElement.dataset.moaPickerDelegate === "2") return;
+          d.documentElement.dataset.moaPickerDelegate = "2";
+
+          function isDropdownOpen() {
+            const list =
+              d.querySelector('[data-baseweb="popover"] [role="listbox"]') ||
+              d.querySelector('[data-baseweb="menu"]') ||
+              d.querySelector('ul[role="listbox"]') ||
+              d.querySelector('[role="listbox"]');
+            if (!list) return false;
+            const style = w.getComputedStyle(list);
+            if (style && (style.visibility === "hidden" || style.display === "none")) {
+              return false;
+            }
+            return true;
+          }
 
           function fireClick(el) {
             if (!el) return;
-            ["pointerdown", "mousedown", "mouseup", "click"].forEach(function (type) {
-              el.dispatchEvent(
-                new MouseEvent(type, {
-                  bubbles: true,
-                  cancelable: true,
-                  view: w,
-                })
-              );
-            });
+            el.dispatchEvent(
+              new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: w })
+            );
+            el.dispatchEvent(
+              new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: w })
+            );
+            el.dispatchEvent(
+              new MouseEvent("click", { bubbles: true, cancelable: true, view: w })
+            );
           }
 
           function findMoaSelectbox() {
@@ -1275,89 +1297,68 @@ def render_moa_section_header() -> None:
                 n = n.nextElementSibling;
               }
             }
-            const anchor = d.getElementById("moa-keyword-picker-section");
-            if (anchor) {
-              let n = anchor.closest('[data-testid="stElementContainer"]');
-              n = n ? n.nextElementSibling : null;
-              for (let i = 0; i < 12 && n; i++) {
-                const box = n.querySelector(
-                  '[data-testid="stSelectbox"], .stSelectbox'
-                );
-                if (box) return box;
-                n = n.nextElementSibling;
-              }
-            }
-            // 키워드 선택창만: placeholder 텍스트로 보조 탐색
             const boxes = d.querySelectorAll('[data-testid="stSelectbox"], .stSelectbox');
             for (let i = 0; i < boxes.length; i++) {
               const t = (boxes[i].innerText || "").trim();
-              if (t.indexOf("키워드 선택") >= 0 || t.indexOf("키워드") >= 0) {
-                return boxes[i];
-              }
+              if (t.indexOf("키워드 선택") >= 0) return boxes[i];
             }
-            return boxes[0] || null;
+            return null;
           }
 
-          function openDropdownArrow(box) {
-            if (!box) return false;
+          function openDropdownOnce(box) {
+            if (!box || isDropdownOpen()) return isDropdownOpen();
             const combo =
               box.querySelector('[role="combobox"]') ||
               box.querySelector('[data-baseweb="select"] > div') ||
-              box.querySelector('[data-baseweb="select"]') ||
-              box.querySelector("input");
-            const arrow =
-              box.querySelector('[data-testid="stSelectboxChevron"]') ||
-              box.querySelector('[data-baseweb="select"] svg') ||
-              box.querySelector("svg");
+              box.querySelector('[data-baseweb="select"]');
+            if (!combo) return false;
+            try { combo.focus(); } catch (err) {}
+            // 한 번만 클릭 (재클릭 시 닫힘)
+            fireClick(combo);
+            return isDropdownOpen();
+          }
 
-            // value container / combobox 를 먼저 열어 BaseWeb 드롭다운 유도
-            if (combo) {
-              try { combo.focus(); } catch (err) {}
-              fireClick(combo);
-              combo.dispatchEvent(
-                new KeyboardEvent("keydown", {
-                  key: "ArrowDown",
-                  code: "ArrowDown",
-                  keyCode: 40,
-                  which: 40,
-                  bubbles: true,
-                  cancelable: true,
-                })
-              );
-            }
-            if (arrow) {
-              fireClick(arrow.closest("div") || arrow);
-            }
-            // 목록이 열렸는지 확인
-            return !!(
+          function ensureListVisible() {
+            const list =
               d.querySelector('[data-baseweb="popover"]') ||
-              d.querySelector('[data-baseweb="menu"]') ||
-              d.querySelector('ul[role="listbox"]') ||
-              d.querySelector('[role="listbox"]')
-            );
+              d.querySelector('[role="listbox"]');
+            if (!list) return;
+            try {
+              list.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            } catch (err) {}
           }
 
           function openMoaKeywordPicker() {
-            // 사용자 제스처 안에서 즉시 1회 시도 (모바일 드롭다운 허용)
-            openDropdownArrow(findMoaSelectbox());
-
+            if (isDropdownOpen()) {
+              ensureListVisible();
+              return;
+            }
             const anchor =
               d.getElementById("moa-keyword-picker-section") ||
-              d.getElementById("moa-keyword-select-marker");
+              d.getElementById("moa-keyword-select-marker") ||
+              findMoaSelectbox();
+            // 목록이 아래쪽에 펼쳐지도록 위쪽에 여유 두고 스크롤
             if (anchor) {
-              anchor.scrollIntoView({ behavior: "smooth", block: "center" });
+              anchor.scrollIntoView({ behavior: "smooth", block: "start" });
             }
+            // 스크롤이 끝난 뒤 딱 1~2회만 열기 (토글 방지)
             var tries = 0;
             function attempt() {
+              if (isDropdownOpen()) {
+                ensureListVisible();
+                return;
+              }
               tries += 1;
-              const opened = openDropdownArrow(findMoaSelectbox());
-              if (opened) return;
-              if (tries < 10) w.setTimeout(attempt, 150);
+              openDropdownOnce(findMoaSelectbox());
+              if (isDropdownOpen()) {
+                ensureListVisible();
+                return;
+              }
+              if (tries < 3) w.setTimeout(attempt, 220);
             }
-            w.setTimeout(attempt, 200);
+            w.setTimeout(attempt, 450);
           }
 
-          // Streamlit 리렌더로 링크가 바뀌어도 동작하도록 문서에 위임
           d.addEventListener(
             "click",
             function (e) {
