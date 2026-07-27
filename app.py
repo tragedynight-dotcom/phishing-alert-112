@@ -43,7 +43,7 @@ def inject_pwa_head() -> None:
         (function () {{
           const doc = window.parent.document;
           const APP_NAME = "피싱범죄 DaMoa";
-          const SHORT_NAME = "DaMoa";
+          const SHORT_NAME = "피싱범죄 DaMoa";
           const ICON_192 = {json.dumps(icon_192)};
           const ICON_512 = {json.dumps(icon_512)};
           const APPLE_ICON = {json.dumps(apple_icon)};
@@ -4073,7 +4073,7 @@ if _alert_moa_q:
 # ---------------------------------------------------------------------------
 # 홈 화면: 긴급 주의보
 # ---------------------------------------------------------------------------
-st.caption("제작 : 광주동부경찰서 범죄예방대응과")
+# 제작 표기 (필요 시 복원): st.caption("제작 : 광주동부경찰서 범죄예방대응과")
 st.markdown(
     '<h1 class="phishing-mobile-title">👮‍♂️피싱범죄 DaMoa👮‍♀️</h1>',
     unsafe_allow_html=True,
