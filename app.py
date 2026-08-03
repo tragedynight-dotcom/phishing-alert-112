@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import requests
 import streamlit as st
@@ -138,7 +138,7 @@ if "moa_last_picked" not in st.session_state:
 ALERT_LOOKBACK_DAYS = 14
 # 네이버 검색 API 결과 캐시 (초) — 30분
 NAVER_API_CACHE_TTL = 1800
-# NAVER API Hub (콘솔: console.ncloud.com/naver-api-hub) — 구 openapi.naver.com 과 URL·헤더가 다름
+# NAVER API Hub (console.ncloud.com/naver-api-hub)
 NAVER_NEWS_SEARCH_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
 
 
@@ -281,18 +281,6 @@ st.markdown(
       color: #fff;
       word-break: keep-all;
       text-align: center;
-    }
-    .phishing-alert-keyword-link {
-      color: #fff !important;
-      text-decoration: underline !important;
-      text-underline-offset: 0.14em;
-      text-decoration-thickness: 2px;
-      cursor: pointer;
-      -webkit-tap-highlight-color: rgba(255, 255, 255, 0.25);
-      touch-action: manipulation;
-    }
-    .phishing-alert-keyword-link:hover {
-      color: #fee2e2 !important;
     }
     .phishing-alert-kw-main {
       text-align: center;
@@ -1085,57 +1073,28 @@ def render_naver_api_attribution() -> None:
     )
 
 
-def format_phishing_112_report_hint(keyword: str | list[str] | None) -> str:
-    """키워드에 맞춘 112 신고 안내 문구."""
-    if isinstance(keyword, list):
-        labels = [k for k in keyword if k]
-        label = " · ".join(labels) if labels else "피싱"
-    else:
-        label = (keyword or "").strip() or "피싱"
-    return f"그리고 「{label}」 의심 시 즉시 112에 신고해 주세요."
-
-
 def render_app_analysis_block(analysis: dict) -> None:
     """API 검색결과와 구분된 자체 범행 수법 분석 블록."""
     st.markdown('<div class="phishing-app-analysis-block"></div>', unsafe_allow_html=True)
     st.markdown(f"**🔎 범행 수법 분석:** {analysis['how_detail']}")
-    report_hint = format_phishing_112_report_hint(
-        analysis.get("primary") or (analysis.get("keywords") or [None])[0]
-    )
-    st.info(f"🛡️ 예방: {analysis['watch']} {report_hint}")
+    st.info(f"🛡️ 예방: {analysis['watch']}")
 
 
 def render_phishing_alert_block(alert: dict) -> None:
-    """피싱 주의보 — 키워드 링크 클릭 시 예방 포인트 아래 기사 목록으로 이동."""
+    """피싱 주의보 — 최근 주의 키워드·예방 안내 표시."""
     keywords = alert.get("keywords") or [alert["keyword"]]
     keywords = [kw for kw in keywords if kw]
     count = alert["count"]
 
-    _link_nonce = int(st.session_state.get("moa_alert_link_nonce") or 1)
-    link_parts = [
-        (
-            f'<a class="phishing-alert-keyword-link" '
-            f'href="?alert_moa={quote(kw)}&n={_link_nonce}" '
-            f'target="_self">{html.escape(kw)}</a>'
-        )
-        for kw in keywords
-    ]
-    keyword_html = " · ".join(link_parts)
+    keyword_html = " · ".join(html.escape(kw) for kw in keywords)
 
     how_html = html.escape(alert["how_full"]).replace("\n", "<br>")
     watch_html = ""
-    report_hint = format_phishing_112_report_hint(keywords)
     if alert.get("watch"):
         watch = html.escape(alert["watch"].strip()).replace("\n", "<br>")
-        report_html = html.escape(report_hint)
         watch_html = (
             f'<div class="phishing-alert-watch"><strong>🛡️ 예방 포인트</strong><br>'
-            f"{watch} {report_html}</div>"
-        )
-    else:
-        watch_html = (
-            f'<div class="phishing-alert-watch"><strong>🛡️ 예방 포인트</strong><br>'
-            f"{html.escape(report_hint)}</div>"
+            f"{watch}</div>"
         )
 
     guide_links_html = (
@@ -1499,11 +1458,28 @@ MODUS_RULES: list[dict] = [
 
 
 def get_naver_credentials():
+    client_id = None
+    client_secret = None
+
     try:
-        client_id = st.secrets["NAVER_CLIENT_ID"]
-        client_secret = st.secrets["NAVER_CLIENT_SECRET"]
+        client_id = st.secrets.get("NAVER_CLIENT_ID")
+        client_secret = st.secrets.get("NAVER_CLIENT_SECRET")
     except Exception:
-        return None, None
+        pass
+
+    if not client_id or not client_secret:
+        secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+        if secrets_path.is_file():
+            try:
+                import tomllib
+
+                data = tomllib.loads(
+                    secrets_path.read_text(encoding="utf-8-sig")
+                )
+                client_id = client_id or data.get("NAVER_CLIENT_ID")
+                client_secret = client_secret or data.get("NAVER_CLIENT_SECRET")
+            except Exception:
+                pass
 
     if (
         not client_id
@@ -1512,7 +1488,7 @@ def get_naver_credentials():
         or "your_client" in str(client_secret)
     ):
         return None, None
-    return client_id, client_secret
+    return str(client_id).strip(), str(client_secret).strip()
 
 
 def format_naver_search_error(query: str, exc: requests.HTTPError) -> str:
@@ -4056,7 +4032,7 @@ with st.spinner(
         fetch_errors,
         alert_keywords,
         alert_news,
-    ) = fetch_phishing_news(client_id, client_secret, _cache_ver=57)
+    ) = fetch_phishing_news(client_id, client_secret, _cache_ver=59)
 
 if fetch_errors and not news_list:
     st.error("뉴스 데이터를 가져오지 못했습니다.\n\n- " + "\n- ".join(fetch_errors))
@@ -4065,32 +4041,6 @@ elif fetch_errors:
     st.warning("일부 검색만 실패했습니다: " + " / ".join(fetch_errors))
 
 crime_counter = Counter(alert_crime_hits)
-
-# 주의보 키워드 하이퍼링크(?alert_moa=&n=) — nonce로 한 번만 적용
-_alert_moa_q = st.query_params.get("alert_moa")
-_alert_moa_n = st.query_params.get("n")
-if isinstance(_alert_moa_q, (list, tuple)):
-    _alert_moa_q = _alert_moa_q[0] if _alert_moa_q else None
-if isinstance(_alert_moa_n, (list, tuple)):
-    _alert_moa_n = _alert_moa_n[0] if _alert_moa_n else None
-if _alert_moa_q:
-    _nonce = str(_alert_moa_n or "")
-    _consumed = str(st.session_state.get("moa_alert_consumed_nonce") or "")
-    if _nonce and _nonce != _consumed:
-        trigger_moa_from_alert(str(_alert_moa_q))
-        st.session_state.moa_alert_consumed_nonce = _nonce
-        try:
-            st.session_state.moa_alert_link_nonce = int(_nonce) + 1
-        except ValueError:
-            st.session_state.moa_alert_link_nonce = (
-                int(st.session_state.get("moa_alert_link_nonce") or 1) + 1
-            )
-    for _qp in ("alert_moa", "n"):
-        if _qp in st.query_params:
-            try:
-                del st.query_params[_qp]
-            except Exception:
-                pass
 
 # ---------------------------------------------------------------------------
 # 홈 화면: 긴급 주의보
