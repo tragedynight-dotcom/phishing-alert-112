@@ -282,6 +282,20 @@ st.markdown(
       word-break: keep-all;
       text-align: center;
     }
+    /* 딥페이크 등 법적 부연 괄호 — 본 키워드보다 작게 */
+    .keyword-legal-note {
+      font-size: 0.72em;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      opacity: 0.92;
+    }
+    .phishing-alert-keyword .keyword-legal-note {
+      font-size: 0.42em;
+      font-weight: 700;
+      opacity: 0.9;
+      margin-left: 0.06em;
+      vertical-align: middle;
+    }
     .phishing-alert-kw-main {
       text-align: center;
       margin: 0.08rem 0 0.35rem;
@@ -1008,7 +1022,103 @@ def summarize_crime_from_news(top_crime: str, news_list: list[dict]) -> str:
         return ""
 
     top_tactics = [name for name, _ in tactic_counter.most_common(3)]
-    return f"보도에서는 **{' / '.join(top_tactics)}** 방식이 함께 언급됩니다."
+    return apply_keyword_display_labels(
+        f"보도에서는 **{' / '.join(top_tactics)}** 방식이 함께 언급됩니다."
+    )
+
+
+# 화면 표시용 키워드 부연 (검색·매칭 키는 그대로 두고 UI에만 적용)
+KEYWORD_DISPLAY_NOTES = {
+    "딥페이크": "(허위 영상물 제조 및 반포)",
+}
+
+
+def _keyword_plain_full(raw: str) -> str:
+    note = KEYWORD_DISPLAY_NOTES.get(raw, "")
+    return f"{raw}{note}" if note else raw
+
+
+def _keyword_html_full(raw: str) -> str:
+    note = KEYWORD_DISPLAY_NOTES.get(raw)
+    if not note:
+        return html.escape(raw)
+    return (
+        f'{html.escape(raw)}'
+        f'<span class="keyword-legal-note">{html.escape(note)}</span>'
+    )
+
+
+def _keyword_md_full(raw: str) -> str:
+    """마크다운/캡션용 — 괄호만 작게."""
+    note = KEYWORD_DISPLAY_NOTES.get(raw)
+    if not note:
+        return raw
+    return f"{raw}<span class='keyword-legal-note'>{note}</span>"
+
+
+def format_keyword_label(keyword: str | None) -> str:
+    """키워드를 사용자에게 보여줄 표기(일반 텍스트)로 바꿉니다."""
+    if not keyword:
+        return ""
+    return apply_keyword_display_labels(str(keyword))
+
+
+def format_keyword_label_html(keyword: str | None) -> str:
+    """키워드 HTML 표기 — 부연 괄호는 작은 글씨."""
+    if not keyword:
+        return ""
+    return apply_keyword_display_labels(str(keyword), as_html=True)
+
+
+def format_keyword_labels(keywords: list[str] | tuple[str, ...] | None) -> str:
+    """키워드 목록을 화면용 ' · ' 구분 문자열로 만듭니다."""
+    if not keywords:
+        return ""
+    return " · ".join(format_keyword_label(kw) for kw in keywords if kw)
+
+
+def format_keyword_labels_html(
+    keywords: list[str] | tuple[str, ...] | None,
+) -> str:
+    if not keywords:
+        return ""
+    return " · ".join(format_keyword_label_html(kw) for kw in keywords if kw)
+
+
+def apply_keyword_display_labels(
+    text: str | None, *, as_html: bool = False, as_markdown: bool = False
+) -> str:
+    """문장·라벨 안의 키워드를 표시용 표기로 치환합니다."""
+    if not text:
+        return ""
+    result = str(text)
+    for raw, note in KEYWORD_DISPLAY_NOTES.items():
+        if as_html:
+            target = _keyword_html_full(raw)
+        elif as_markdown:
+            target = _keyword_md_full(raw)
+        else:
+            target = _keyword_plain_full(raw)
+
+        # 이미 붙은 괄호·small/span 표기를 목표 형식으로 통일
+        result = re.sub(
+            re.escape(raw)
+            + r"(?:<span class=['\"]keyword-legal-note['\"]>)?"
+            + r"(?:<small(?: class=['\"]keyword-legal-note['\"])?>)?"
+            + r"\(허위\s*영상물\s*제조\s*및\s*반포\)"
+            + r"(?:</small>)?"
+            + r"(?:</span>)?",
+            target,
+            result,
+        )
+        # 아직 부연이 없는 키워드만 확장
+        result = re.sub(
+            re.escape(raw)
+            + r"(?!\(허위|<span class=['\"]keyword-legal-note['\"]>|<small)",
+            target,
+            result,
+        )
+    return result
 
 
 def select_tied_top_keywords(
@@ -1044,17 +1154,18 @@ def build_urgent_alert_info(
         how_base = profile.get("how", "")
         news_hint = summarize_crime_from_news(crime, news_list)
         how_full = f"{how_base} {news_hint}".strip() if news_hint else how_base
+        display_crime = format_keyword_label(crime)
         if len(keywords) > 1:
-            how_parts.append(f"[{crime}] {how_full}")
+            how_parts.append(f"[{display_crime}] {how_full}")
             if profile.get("watch"):
-                watch_parts.append(f"[{crime}] {profile['watch']}")
+                watch_parts.append(f"[{display_crime}] {profile['watch']}")
         else:
             how_parts.append(how_full)
             if profile.get("watch"):
                 watch_parts.append(profile["watch"])
 
     return {
-        "keyword": " · ".join(keywords),
+        "keyword": format_keyword_labels(keywords),
         "keywords": keywords,
         "count": top_count,
         "how": how_parts[0] if how_parts else "",
@@ -1076,8 +1187,15 @@ def render_naver_api_attribution() -> None:
 def render_app_analysis_block(analysis: dict) -> None:
     """API 검색결과와 구분된 자체 범행 수법 분석 블록."""
     st.markdown('<div class="phishing-app-analysis-block"></div>', unsafe_allow_html=True)
-    st.markdown(f"**🔎 범행 수법 분석:** {analysis['how_detail']}")
-    st.info(f"🛡️ 예방: {analysis['watch']}")
+    how_detail = apply_keyword_display_labels(
+        analysis.get("how_detail", ""), as_markdown=True
+    )
+    watch = apply_keyword_display_labels(analysis.get("watch", ""))
+    st.markdown(
+        f"**🔎 범행 수법 분석:** {how_detail}",
+        unsafe_allow_html=True,
+    )
+    st.info(f"🛡️ 예방: {watch}")
 
 
 def render_phishing_alert_block(alert: dict) -> None:
@@ -1086,7 +1204,7 @@ def render_phishing_alert_block(alert: dict) -> None:
     keywords = [kw for kw in keywords if kw]
     count = alert["count"]
 
-    keyword_html = " · ".join(html.escape(kw) for kw in keywords)
+    keyword_html = " · ".join(format_keyword_label_html(kw) for kw in keywords)
 
     how_html = html.escape(alert["how_full"]).replace("\n", "<br>")
     watch_html = ""
@@ -3046,13 +3164,15 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
     st.markdown(
         '<div id="alert-news-section" style="height:1px;margin:0;padding:0;"></div>'
         f'<p class="phishing-moa-card-label">'
-        f"🚨 주의 키워드 「{html.escape(keyword)}」 "
+        f"🚨 주의 키워드 「{html.escape(format_keyword_label(keyword))}」 "
         f"기사 목록 {len(articles)}건</p>",
         unsafe_allow_html=True,
     )
 
     if not articles:
-        st.info(f"「{keyword}」 주의 키워드 기사 목록에 포함된 기사가 없습니다.")
+        st.info(
+            f"「{format_keyword_label(keyword)}」 주의 키워드 기사 목록에 포함된 기사가 없습니다."
+        )
         if st.session_state.pop("_clear_alert_inline_close_cb", False):
             st.session_state.pop("alert_inline_close_cb", None)
         if st.checkbox("닫기", key="alert_inline_close_cb"):
@@ -3067,15 +3187,20 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
     for idx, news in enumerate(visible, 1):
         if focus_idx is not None and idx == focus_idx:
             st.markdown('<div id="alert-article-focus"></div>', unsafe_allow_html=True)
-        kw_label = (
-            " · ".join(news["keywords"])
-            if news.get("keywords")
-            else (news.get("analysis") or {}).get("primary", keyword)
+        kw_label = format_keyword_labels_html(
+            news.get("keywords")
+        ) or format_keyword_label_html(
+            (news.get("analysis") or {}).get("primary", keyword)
         )
         with st.container(border=True):
             st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
-            st.caption(
-                f"📢 {news.get('press', '')} | 🗓️ {news.get('date', '')} | 🏷️ {kw_label}"
+            st.markdown(
+                f'<p style="color:rgba(49,51,63,0.6);font-size:0.875rem;'
+                f'margin:0.25rem 0 0.5rem;">'
+                f"📢 {html.escape(str(news.get('press', '')))} | "
+                f"🗓️ {html.escape(str(news.get('date', '')))} | "
+                f"🏷️ {kw_label}</p>",
+                unsafe_allow_html=True,
             )
             if news.get("description"):
                 snippet = news["description"]
@@ -3093,7 +3218,9 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
     if remaining > 0:
         add_count = min(10, remaining)
         action = render_more_with_close(
-            more_label=f"🔽 「{keyword}」 더보기 ({add_count}개 추가)",
+            more_label=(
+                f"🔽 「{format_keyword_label(keyword)}」 더보기 ({add_count}개 추가)"
+            ),
             more_key="alert_inline_more_" + re.sub(r"\W+", "_", keyword),
             close_key="alert_inline_close_cb",
         )
@@ -3102,7 +3229,10 @@ def render_alert_inline_articles(articles: list[dict], keyword: str) -> None:
             more_label=None,
             more_key=None,
             close_key="alert_inline_close_cb",
-            done_caption=f"「{keyword}」 기사 {len(articles)}건을 모두 표시했습니다.",
+            done_caption=(
+                f"「{format_keyword_label(keyword)}」 기사 "
+                f"{len(articles)}건을 모두 표시했습니다."
+            ),
         )
 
     if action == "more":
@@ -3692,21 +3822,41 @@ def analyze_crime_method(title: str, description: str, keywords: list[str]) -> d
     else:
         confidence = "low"
 
+    def _emph_kw(label: str) -> str:
+        """키워드 강조 + 부연 괄호는 작은 글씨(HTML)."""
+        marked = apply_keyword_display_labels(label, as_markdown=True)
+        if "<span" in marked:
+            # 본 키워드만 strong, 괄호 span은 밖에 두어 크기 유지
+            for raw, note in KEYWORD_DISPLAY_NOTES.items():
+                html_note = (
+                    f"<span class='keyword-legal-note'>{html.escape(note)}</span>"
+                )
+                plain_with_note = f"{raw}{html_note}"
+                if plain_with_note in marked:
+                    marked = marked.replace(
+                        plain_with_note,
+                        f"<strong>{html.escape(raw)}</strong>{html_note}",
+                    )
+            return marked
+        return f"<strong>{html.escape(marked)}</strong>"
+
+    primary_label = _emph_kw(primary)
+    tactics_label = " / ".join(_emph_kw(t) for t in tactics)
     if confidence == "high":
         how_detail = (
-            f"이 기사에서는 **{primary}** 유형으로 보이며, "
-            f"구체적으로 **{' / '.join(tactics)}** 방식이 확인됩니다. "
+            f"이 기사에서는 {primary_label} 유형으로 보이며, "
+            f"구체적으로 {tactics_label} 방식이 확인됩니다. "
             f"{profile['how']}"
         )
     elif confidence == "medium":
         how_detail = (
-            f"이 기사는 **{primary}** 관련으로 보이며, "
-            f"요약상 **{' / '.join(tactics)}** 방식으로 **추정**됩니다. "
+            f"이 기사는 {primary_label} 관련으로 보이며, "
+            f"요약상 {tactics_label} 방식으로 <strong>추정</strong>됩니다. "
             f"{profile['how']}"
         )
     else:
         how_detail = (
-            f"이 기사는 **{primary}** 관련 보도로 **추정**됩니다. "
+            f"이 기사는 {primary_label} 관련 보도로 <strong>추정</strong>됩니다. "
             f"구체 수법 단서가 부족해 유형 기본 설명을 안내합니다. {profile['how']}"
         )
 
@@ -4023,7 +4173,9 @@ if not client_id or not client_secret:
     st.stop()
 
 with st.spinner(
-    "보이스피싱, 스미싱, 딥페이크 등 전기통신금융사기 뉴스를 수집·분석 중입니다."
+    apply_keyword_display_labels(
+        "보이스피싱, 스미싱, 딥페이크 등 전기통신금융사기 뉴스를 수집·분석 중입니다."
+    )
 ):
     (
         news_list,
@@ -4051,9 +4203,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.write(
-    "보이스피싱, 스미싱, 딥페이크 등 최신 전기통신금융사기 뉴스를 수집·분석하여 "
-    "실제 범행 수법과 피해 사례를 확인하고, 이를 바탕으로 한 최근 피싱범죄 키워드와 "
-    "예방 정보를 함께 안내해 드립니다."
+    apply_keyword_display_labels(
+        "보이스피싱, 스미싱, 딥페이크 등 최신 전기통신금융사기 뉴스를 수집·분석하여 "
+        "실제 범행 수법과 피해 사례를 확인하고, 이를 바탕으로 한 최근 피싱범죄 키워드와 "
+        "예방 정보를 함께 안내해 드립니다."
+    )
 )
 st.caption("뉴스 검색: **네이버 OPEN API** (Search API)")
 
@@ -4118,14 +4272,18 @@ if news_list:
             analysis = news["analysis"]
             with st.container(border=True):
                 st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
-                st.caption(
-                    f"📢 {news['press']} | 🗓️ {news['date']} | "
-                    f"🏷️ {analysis['primary']}"
-                    + (
-                        f" · {' · '.join(analysis['keywords'][1:])}"
-                        if len(analysis["keywords"]) > 1
-                        else ""
+                _kw_caption = format_keyword_label_html(analysis.get("primary"))
+                if len(analysis.get("keywords") or []) > 1:
+                    _kw_caption += " · " + format_keyword_labels_html(
+                        analysis["keywords"][1:]
                     )
+                st.markdown(
+                    f'<p style="color:rgba(49,51,63,0.6);font-size:0.875rem;'
+                    f'margin:0.25rem 0 0.5rem;">'
+                    f"📢 {html.escape(str(news['press']))} | "
+                    f"🗓️ {html.escape(str(news['date']))} | "
+                    f"🏷️ {_kw_caption}</p>",
+                    unsafe_allow_html=True,
                 )
 
                 if analysis.get("snippet"):
@@ -4235,6 +4393,7 @@ picked = st.selectbox(
     placeholder="키워드 선택",
     label_visibility="collapsed",
     key="moa_keyword_picker",
+    format_func=format_keyword_label,
     on_change=on_moa_keyword_picker_change,
 )
 
@@ -4292,14 +4451,18 @@ moa_from_alert = st.session_state.get("moa_search_source") == "alert"
 
 if selected_kw and moa_from_alert:
     # 주의보 기사는 예방 포인트 아래에서 이미 표시
-    display_kw = st.session_state.get("moa_alert_display_kw") or selected_kw
+    display_kw = format_keyword_label(
+        st.session_state.get("moa_alert_display_kw") or selected_kw
+    )
     st.info(
         f"주의 키워드 「{display_kw}」 기사 목록은 위 **예방 포인트 아래**에서 확인할 수 있습니다."
     )
     st.session_state.pop("moa_from_alert_nav", None)
     st.session_state.pop("moa_crime_only", None)
 elif selected_kw:
-    with st.spinner(f"「{selected_kw}」 관련 기사 불러오는 중…"):
+    with st.spinner(
+        f"「{format_keyword_label(selected_kw)}」 관련 기사 불러오는 중…"
+    ):
         moa_articles, moa_error = fetch_moa_keyword_news(
             client_id, client_secret, selected_kw
         )
@@ -4342,7 +4505,7 @@ if selected_kw and not moa_from_alert:
             st.markdown(
                 f'<div class="phishing-moa-label-row">'
                 f'<p class="phishing-moa-card-label">'
-                f"「{html.escape(str(selected_kw))}」 최신 기사 "
+                f"「{html.escape(format_keyword_label(str(selected_kw)))}」 최신 기사 "
                 f"{len(moa_articles)}건</p></div>",
                 unsafe_allow_html=True,
             )
@@ -4376,15 +4539,20 @@ if selected_kw and not moa_from_alert:
                     )
                 keywords = news.get("keywords") or []
                 analysis = news.get("analysis") or {}
-                kw_label = (
-                    " · ".join(keywords)
-                    if keywords
-                    else (analysis.get("primary") or selected_kw)
+                kw_label = format_keyword_labels_html(
+                    keywords
+                ) or format_keyword_label_html(
+                    analysis.get("primary") or selected_kw
                 )
                 with st.container(border=True):
                     st.markdown(f"**{idx}. [{news['title']}]({news['link']})**")
-                    st.caption(
-                        f"📢 {news['press']} | 🗓️ {news['date']} | 🏷️ {kw_label}"
+                    st.markdown(
+                        f'<p style="color:rgba(49,51,63,0.6);font-size:0.875rem;'
+                        f'margin:0.25rem 0 0.5rem;">'
+                        f"📢 {html.escape(str(news['press']))} | "
+                        f"🗓️ {html.escape(str(news['date']))} | "
+                        f"🏷️ {kw_label}</p>",
+                        unsafe_allow_html=True,
                     )
                     if news.get("description"):
                         snippet = news["description"]
@@ -4402,7 +4570,10 @@ if selected_kw and not moa_from_alert:
             if remaining_moa > 0:
                 add_count = min(10, remaining_moa)
                 moa_action = render_more_with_close(
-                    more_label=f"🔽 「{selected_kw}」 더보기 ({add_count}개 추가)",
+                    more_label=(
+                        f"🔽 「{format_keyword_label(selected_kw)}」 더보기 "
+                        f"({add_count}개 추가)"
+                    ),
                     more_key=moa_more_key,
                     close_key="moa_list_close_cb",
                 )
@@ -4413,7 +4584,8 @@ if selected_kw and not moa_from_alert:
                     more_key=None,
                     close_key="moa_list_close_cb",
                     done_caption=(
-                        f"「{selected_kw}」 기사 {len(moa_articles)}건을 모두 표시했습니다."
+                        f"「{format_keyword_label(selected_kw)}」 기사 "
+                        f"{len(moa_articles)}건을 모두 표시했습니다."
                     ),
                 )
             if moa_action == "more":
@@ -4430,10 +4602,13 @@ if selected_kw and not moa_from_alert:
         else:
             if moa_crime_only:
                 st.info(
-                    f"「{selected_kw}」 관련 기사 중 범죄기사 조건에 맞는 기사가 없습니다."
+                    f"「{format_keyword_label(selected_kw)}」 관련 기사 중 "
+                    "범죄기사 조건에 맞는 기사가 없습니다."
                 )
             else:
-                st.info(f"「{selected_kw}」 관련 기사가 없습니다.")
+                st.info(
+                    f"「{format_keyword_label(selected_kw)}」 관련 기사가 없습니다."
+                )
             discard_widget_key(moa_more_key)
             moa_action = render_more_with_close(
                 more_label=None,
